@@ -1,0 +1,58 @@
+---
+description: Expository writing standards for documentation and plan files
+globs: "**/*.md"
+alwaysApply: false
+---
+
+# Expository Writing
+
+When describing a system's architecture or a multi-stage pipeline, **never** open with a numbered/bulleted list of stages followed by prose that re-explains the same stages. The list adds nothing the prose doesn't already convey, and it fragments the narrative into disconnected labels before the reader has any context for them.
+
+Instead, write a single flowing paragraph (or a few short paragraphs) that introduces the system and walks through each stage in sequence, so the reader builds understanding incrementally. Each stage should connect causally to the next — the output of one becomes the input of another.
+
+## Bad
+
+```markdown
+1. **Capture Layer** — Drop-in pandas replacement module, operation tracer
+2. **Logical Plan** — IR, operation nodes
+3. **Translator** — Converts algebra, optimization pass
+4. **Execution** — Sheet layout, formula definitions
+
+Fornero is a drop-in replacement for pandas…
+```
+
+The list front-loads jargon with no explanation, then the paragraph restarts from scratch.
+
+## Good
+
+```markdown
+Fornero is a drop-in replacement for pandas… every DataFrame carries a
+tree of operation nodes — the logical plan — that captures the full
+lineage of transformations. When the user materialises a spreadsheet, a
+translator walks this tree and converts each operation into concrete
+cell ranges and formulas. The result is an execution plan that a Sheets
+executor applies via batched API calls.
+```
+
+One narrative, no redundancy, each stage motivated by the previous one.
+
+## No section numbers
+
+Do not prefix headings with numbers (e.g., "## 1. Architecture Overview", "### Component 3: Translator"). Headings should stand on their own — the document's structure already communicates order through heading hierarchy and sequencing. Numbered headings add visual clutter and create maintenance burden when sections are reordered.
+
+## No horizontal-rule separators between sections
+
+Do not place `---` horizontal rules between sections. Headings already provide clear visual separation. Adding rules creates excessive whitespace and makes the document feel disjointed rather than continuous.
+
+## Use direct verbs, not stilted constructions
+
+Prefer "X does Y" over roundabout phrasing like "X operates through Y", "X is responsible for Y", or "X provides the capability of Y". The subject should act.
+
+**Bad:** "Fornero operates through dual-mode execution."
+**Good:** "Fornero executes every operation in two modes simultaneously."
+
+**Bad:** "The translator is responsible for converting each node."
+**Good:** "The translator converts each node."
+
+**Bad:** "This class provides the functionality to track plans."
+**Good:** "This class tracks plans."

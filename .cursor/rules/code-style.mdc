@@ -1,0 +1,8 @@
+---
+description: Code style preferences
+alwaysApply: true
+---
+
+# Code Style
+
+- Do not use section separator comments (e.g. `# -----------` or `# ===`). Use whitespace between functions; the code structure should speak for itself.
