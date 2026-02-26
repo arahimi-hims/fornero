@@ -68,12 +68,12 @@ class Translator:
         self.materialized: Dict[int, MaterializationContext] = {}
         self.counter = 0
 
-    def translate(self, plan: LogicalPlan, source_data: Optional[Dict[str, Any]] = None) -> List[SpreadsheetOp]:
+    def translate(self, plan: LogicalPlan, source_data: Dict[str, Any] | None = None) -> List[SpreadsheetOp]:
         """Translate a logical plan to spreadsheet operations.
 
         Args:
             plan: LogicalPlan to translate
-            source_data: Optional mapping of source_id to data (for Source nodes)
+            source_data: Mapping of source_id to data (for Source nodes), defaults to empty dict if None
 
         Returns:
             List of SpreadsheetOp dataclass instances (CreateSheet, SetValues, SetFormula)

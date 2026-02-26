@@ -1,10 +1,13 @@
 # Fornero
 
 Fornero converts pandas-style DataFrame programs into spreadsheets. It's a
-compiler that translates dataframe operations into formal spreadsheet algebra. That algebra  
-is then lowered to a spreadsheet backend like Google Sheets.
+compiler that translates dataframe operations into formal spreadsheet algebra.
+That algebra is then lowered to a spreadsheet backend like Google Sheets. The
+compiler has an algebra for dataframes, and another algebra for spreadsheets. It
+translates from one algebra to the other. The algebras and the translation
+between them are defined in `design-docs/ARCHITECTURE.md`
 
-This comiler is for ex-core engineers who used to write code, but now mostly
+This compiler is for ex-core engineers who used to write code, but now mostly
 attend meetings and write spreadsheets to be consumed by non-engineers. It lets
 them plausibly claim that they "still write code", even though the only artifact
 of value they produce is
@@ -55,7 +58,7 @@ updates automatically.
 
 ## How It Works
 
-Fornero executes every operation in **two modes simultaneously**. Its
+Fornero executes every operation in two modes simultaneously. Its
 `DataFrame` class subclasses `pandas.DataFrame`, so every data frame call runs
 eagerly in pandas and gives you a real result to inspect. Behind the scenes,
 each operation also appends a node to an internal **logical plan**, building an

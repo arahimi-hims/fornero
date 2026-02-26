@@ -6,7 +6,13 @@ alwaysApply: false
 
 # Expository Writing
 
-When describing a system's architecture or a multi-stage pipeline, **never** open with a numbered/bulleted list of stages followed by prose that re-explains the same stages. The list adds nothing the prose doesn't already convey, and it fragments the narrative into disconnected labels before the reader has any context for them.
+## Boldface: concepts only, never for emphasis
+
+Use boldface only for concepts (named things: components, APIs, data structures). Never use it for emphasis.
+
+## Flowing narrative over staged lists
+
+When describing a system's architecture or a multi-stage pipeline, never open with a numbered/bulleted list of stages followed by prose that re-explains the same stages. The list adds nothing the prose doesn't already convey, and it fragments the narrative into disconnected labels before the reader has any context for them.
 
 Instead, write a single flowing paragraph (or a few short paragraphs) that introduces the system and walks through each stage in sequence, so the reader builds understanding incrementally. Each stage should connect causally to the next — the output of one becomes the input of another.
 

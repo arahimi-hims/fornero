@@ -48,10 +48,12 @@ jobs:
 
       - name: Write Google credentials
         env:
-          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
+          GSPREAD_AUTHORIZED_USER: ${{ secrets.GSPREAD_AUTHORIZED_USER }}
         run: |
           mkdir -p ~/.config/gspread
-          echo "$GOOGLE_SERVICE_ACCOUNT_KEY" > ~/.config/gspread/service_account.json
+          echo "$GSPREAD_CREDENTIALS" > ~/.config/gspread/credentials.json
+          echo "$GSPREAD_AUTHORIZED_USER" > ~/.config/gspread/authorized_user.json
 
       - name: Run slow tests
         run: pytest -v --run-slow -m slow
