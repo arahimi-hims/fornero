@@ -1,9 +1,9 @@
 """
 End-to-end compilation utilities.
 
-Each function runs the full compiler pipeline — optimize, translate, build
-execution plan, execute — against a specific backend.  The optimizer is
-always enabled.
+Each function runs the full compiler pipeline — translate (with optimization),
+build execution plan, execute — against a specific backend.  The optimizer is
+always enabled by default in the translator.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from fornero.algebra.logical_plan import LogicalPlan
 from fornero.executor.base import Executor
 from fornero.executor.plan import ExecutionPlan
 from fornero.translator.converter import Translator
-from fornero.translator.optimizer import Optimizer
 
 
 def _run_pipeline(
@@ -23,9 +22,10 @@ def _run_pipeline(
     executor: Executor,
     title: str,
 ) -> Any:
-    """Optimize, translate, and execute a logical plan.
+    """Translate (with optimization) and execute a logical plan.
 
     This is the shared core that every public entry-point delegates to.
+    The translator automatically optimizes the plan before translation.
 
     Args:
         plan: Logical plan produced by a fornero DataFrame.
@@ -37,8 +37,7 @@ def _run_pipeline(
         Whatever the executor returns (e.g. a ``gspread.Spreadsheet`` for
         ``SheetsExecutor``, ``None`` for ``LocalExecutor``).
     """
-    optimized = Optimizer().optimize(plan)
-    ops = Translator().translate(optimized, source_data=source_data)
+    ops = Translator().translate(plan, source_data=source_data)
     execution_plan = ExecutionPlan.from_operations(ops)
     return executor.execute(execution_plan, title)
 

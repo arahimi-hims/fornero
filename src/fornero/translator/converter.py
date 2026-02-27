@@ -18,6 +18,7 @@ from fornero.spreadsheet.operations import (
 )
 from fornero.exceptions import UnsupportedOperationError, PlanValidationError
 from fornero.translator import strategies
+from fornero.translator.optimizer import Optimizer
 
 
 _DICT_TO_OP = {
@@ -68,12 +69,13 @@ class Translator:
         self.materialized: Dict[int, MaterializationContext] = {}
         self.counter = 0
 
-    def translate(self, plan: LogicalPlan, source_data: Dict[str, Any] | None = None) -> List[SpreadsheetOp]:
+    def translate(self, plan: LogicalPlan, source_data: Dict[str, Any] | None = None, optimize: bool = True) -> List[SpreadsheetOp]:
         """Translate a logical plan to spreadsheet operations.
 
         Args:
             plan: LogicalPlan to translate
             source_data: Mapping of source_id to data (for Source nodes), defaults to empty dict if None
+            optimize: Whether to optimize the plan before translation (default: True)
 
         Returns:
             List of SpreadsheetOp dataclass instances (CreateSheet, SetValues, SetFormula)
@@ -89,7 +91,13 @@ class Translator:
         if source_data is None:
             source_data = {}
 
-        self._translate_operation(plan.root, source_data)
+        # Optimize the plan before translation if requested
+        working_plan = plan
+        if optimize:
+            optimizer = Optimizer()
+            working_plan = optimizer.optimize(plan)
+
+        self._translate_operation(working_plan.root, source_data)
 
         return [_DICT_TO_OP[op["type"]](op) for op in self.operations]
 

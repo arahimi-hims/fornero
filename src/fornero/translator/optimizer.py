@@ -69,28 +69,32 @@ class Optimizer:
         if isinstance(op, Sort):
             if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
                 child_filter = optimized_inputs[0]
-                # Fuse filter into sort
-                # If Sort already has a predicate (unlikely unless we have multiple layers), AND them.
-                new_pred = child_filter.predicate
-                if op.predicate:
-                    new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+                # Only fuse if predicates are strings (AST predicates not yet supported in fusion)
+                if isinstance(child_filter.predicate, str) and (op.predicate is None or isinstance(op.predicate, str)):
+                    # Fuse filter into sort
+                    # If Sort already has a predicate (unlikely unless we have multiple layers), AND them.
+                    new_pred = child_filter.predicate
+                    if op.predicate:
+                        new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
 
-                new_sort = Sort(keys=op.keys, inputs=child_filter.inputs,
-                               limit=op.limit, predicate=new_pred)
-                return new_sort
+                    new_sort = Sort(keys=op.keys, inputs=child_filter.inputs,
+                                   limit=op.limit, predicate=new_pred)
+                    return new_sort
 
         # 3. Select(Filter) fusion
         if isinstance(op, Select):
             if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
                 child_filter = optimized_inputs[0]
-                # Fuse filter into select
-                new_pred = child_filter.predicate
-                if op.predicate:
-                    new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+                # Only fuse if predicates are strings (AST predicates not yet supported in fusion)
+                if isinstance(child_filter.predicate, str) and (op.predicate is None or isinstance(op.predicate, str)):
+                    # Fuse filter into select
+                    new_pred = child_filter.predicate
+                    if op.predicate:
+                        new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
 
-                # Clone select with fused predicate and inputs of filter
-                new_select = Select(columns=op.columns, inputs=child_filter.inputs, predicate=new_pred)
-                return new_select
+                    # Clone select with fused predicate and inputs of filter
+                    new_select = Select(columns=op.columns, inputs=child_filter.inputs, predicate=new_pred)
+                    return new_select
 
         # Update with optimized inputs
         if optimized_inputs != op.inputs:
@@ -113,7 +117,8 @@ class Optimizer:
         optimized_inputs = [self._predicate_pushdown(inp) for inp in op.inputs]
 
         # If this is a Filter, try to push it down
-        if isinstance(op, Filter):
+        # Only optimize string predicates; expression AST predicates are handled elsewhere
+        if isinstance(op, Filter) and isinstance(op.predicate, str):
             if len(optimized_inputs) == 1:
                 child = optimized_inputs[0]
 
@@ -128,7 +133,7 @@ class Optimizer:
                             return new_select
 
                 # Can push filter down past another filter (combine them)
-                if isinstance(child, Filter):
+                if isinstance(child, Filter) and isinstance(child.predicate, str):
                     # Combine predicates with AND
                     combined_predicate = f"({child.predicate}) AND ({op.predicate})"
                     return Filter(predicate=combined_predicate, inputs=child.inputs)
@@ -199,7 +204,8 @@ class Optimizer:
 
         # Detect tautological Filter
         if isinstance(op, Filter):
-            if op.predicate.strip() in ("1", "TRUE", "True", "true"):
+            # Only optimize string predicates; expression AST predicates are handled elsewhere
+            if isinstance(op.predicate, str) and op.predicate.strip() in ("1", "TRUE", "True", "true"):
                 # Always-true filter - eliminate
                 if len(optimized_inputs) == 1:
                     return optimized_inputs[0]

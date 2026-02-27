@@ -910,7 +910,8 @@ def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
     num_rows = input_range.row_end - input_range.row + 1
 
     if op.limit:
-        num_rows = min(op.limit, num_rows)
+        # When limit is present, we need header + limit data rows
+        num_rows = min(op.limit + 1, num_rows)
 
     operations = []
 

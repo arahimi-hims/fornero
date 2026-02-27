@@ -425,8 +425,9 @@ class TestOfflineMultiStep:
     def test_filter_then_select_has_multiple_sheets(self):
         from tests.programs import p08_filter_then_select as mod
         executor = self._translate(mod)
-        assert executor.num_sheets >= 3, (
-            "Filter→Select pipeline needs at least source + filter + select sheets"
+        # With optimization enabled, Filter→Select fuses into a single Select with predicate
+        assert executor.num_sheets >= 2, (
+            "Filter→Select pipeline needs at least source + fused select sheets"
         )
 
     def test_multi_step_pipeline_has_many_sheets(self):

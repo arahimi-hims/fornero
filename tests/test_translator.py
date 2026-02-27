@@ -725,12 +725,12 @@ class TestOptimizationPasses:
         plan = LogicalPlan(filter_op)
 
         translator = Translator()
-        ops_unoptimized = translator.translate(plan, source_data={"test.csv": [[10], [3], [7]]})
+        ops_unoptimized = translator.translate(plan, source_data={"test.csv": [[10], [3], [7]]}, optimize=False)
 
         optimizer = Optimizer()
         optimized_plan = optimizer.optimize(plan)
 
-        ops_optimized = translator.translate(optimized_plan, source_data={"test.csv": [[10], [3], [7]]})
+        ops_optimized = translator.translate(optimized_plan, source_data={"test.csv": [[10], [3], [7]]}, optimize=False)
 
         # Should have same number of final sheets (may differ in intermediate sheets)
         create_unopt = [op for op in ops_unoptimized if isinstance(op, CreateSheet)]
