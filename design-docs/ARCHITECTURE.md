@@ -116,11 +116,11 @@ The output relation has rows corresponding to distinct values of $i$ and columns
 
 #### Melt
 
-Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters $\text{var\_name}$ (default $\texttt{"variable"}$) and $\text{value\_name}$ (default $\texttt{"value"}$):
+Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters `var_name` (default `"variable"`) and `value_name` (default `"value"`):
 
 $$\text{Melt}(R, I, V, \text{var_name}, \text{value_name}) = \left[\, r|_I \,\|\, (\text{var_name} \mapsto c,\; \text{value_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
 
-Each row of $R$ fans out to $|V|$ rows. Output schema is $I \,\|\, [\text{var\_name}, \text{value\_name}]$.
+Each row of $R$ fans out to $|V|$ rows. Output schema is $I \,\|\, [\mathit{var\_name}, \mathit{value\_name}]$.
 
 #### Window
 
@@ -430,11 +430,11 @@ These defaults are applied during sheet creation (via `CreateSheet` operations) 
 
 #### Translating Melt
 
-Given $\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name})$ with $I = [i_1, \ldots, i_m]$, $V = [v_1, \ldots, v_k]$, and input at $\rho$:
+Given `Melt(R, I, V, var_name, value_name)` with $I = [i_1, \ldots, i_m]$, $V = [v_1, \ldots, v_k]$, and input at $\rho$:
 
 $$\mathcal{T}(\text{Melt})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(|\rho.\text{rows}| \cdot k \!-\! 1,\; m\!+\!1))$$
 
-Each input row fans out to $k = |V|$ output rows. The translator creates a fresh sheet $s$ and writes headers $I \,\|\, [\text{var\_name}, \text{value\_name}]$ via $\text{SetValues}$.
+Each input row fans out to $k = |V|$ output rows. The translator creates a fresh sheet $s$ and writes headers $I \,\|\, [\mathit{var\_name}, \mathit{value\_name}]$ via `SetValues`.
 
 For each identifier column $i_j \in I$, the translator installs an array formula that repeats each source value $k$ times:
 
@@ -442,15 +442,15 @@ $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, j\!-\!1),\; \texttt{=ARRAYFORMULA
 
 The $\texttt{INT((ROW(...)-1)/}k\texttt{)+1}$ pattern maps each block of $k$ consecutive output rows back to the same source row index.
 
-For the $\text{var\_name}$ column (position $m$), the translator generates a repeating cycle of the value-column names:
+For the `var_name` column (position $m$), the translator generates a repeating cycle of the value-column names:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, m),\; \texttt{=ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"\&ROWS(}\text{col}(\rho, i_1)\texttt{)*}k\texttt{))-1,}k\texttt{)+1,}\; \texttt{"}v_1\texttt{",}\; \ldots\texttt{,}\; \texttt{"}v_k\texttt{"))}\right)$$
 
-For the $\text{value\_name}$ column (position $m\!+\!1$), the translator selects the correct source column per output row:
+For the `value_name` column (position $m\!+\!1$), the translator selects the correct source column per output row:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, m\!+\!1),\; \texttt{=ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"\&ROWS(}\text{col}(\rho, i_1)\texttt{)*}k\texttt{))-1,}k\texttt{)+1,}\; \text{col}(\rho, v_1)\texttt{,}\; \ldots\texttt{,}\; \text{col}(\rho, v_k)\texttt{))}\right)$$
 
-$\texttt{CHOOSE}$ with $\texttt{MOD}$ cycles through the $k$ value columns in order. **Correctness**: $\text{eval}(\rho') = [\, r|_I \,\|\, (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \mid r \in R, c \in V \,]$.
+$\texttt{CHOOSE}$ with $\texttt{MOD}$ cycles through the $k$ value columns in order. **Correctness**: $\text{eval}(\rho') = [\, r|_I \,\|\, (\mathit{var\_name} \mapsto c,\; \mathit{value\_name} \mapsto r.c) \mid r \in R, c \in V \,]$.
 
 #### Translating Window
 
@@ -462,7 +462,7 @@ The translator creates a fresh sheet $s$, writes headers $\mathcal{S}(R) \,\|\, 
 
 Window formulas are **per-row** (not array formulas) because each row's visible frame may differ. For row $i$ (0-indexed in the data), the formula depends on the window function $f$:
 
-**Ranking functions** ($f \in \{\text{rank}, \text{row\_number}\}$): count rows in the same partition with ordering value $\leq$ the current row's:
+**Ranking functions** ($f \in \{\text{rank}, \mathit{row\_number}\}$): count rows in the same partition with ordering value $\leq$ the current row's:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1\!+\!i,\; |\mathcal{S}(R)|),\; \texttt{=COUNTIFS(}\text{col}(\rho, g_1)\texttt{, }s\texttt{!}G_{1+i}\texttt{, }\ldots\texttt{, }\text{col}(\rho, o_1)\texttt{, "<="\&}s\texttt{!}O_{1+i}\texttt{)}\right)$$
 
