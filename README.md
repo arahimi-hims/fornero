@@ -49,7 +49,7 @@ spreadsheet = SheetsExecutor(client).execute(
 print(spreadsheet.url)
 ```
 
-Here is [the spreadsheet it produces](https://docs.google.com/spreadsheets/d/1YJ8mOm5zyEWSIJroD7eO2_oMMpdlUU5xAvK4qpBKBcc/edit?gid=0#gid=0).
+Here is [the spreadsheet it produces](https://docs.google.com/spreadsheets/d/1LyhiYknIi227T0zuiBZumBW5wp2E6n9xpgVfkN_9zM0).
 Each operation (`filter`, `assign`, `sort_values`, column selection) becomes a
 spreadsheet formula (`FILTER`, `ARRAYFORMULA`, `SORT`, column references) so
 the generated sheet stays live — edit the source data and every derived cell
