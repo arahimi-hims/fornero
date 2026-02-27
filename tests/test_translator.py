@@ -613,7 +613,7 @@ class TestOptimizationPasses:
     """Test optimization passes."""
 
     def test_predicate_pushdown(self):
-        """Predicate pushdown moves filter closer to source."""
+        """Predicate pushdown moves filter closer to source, then fuses into Select."""
         source = Source(source_id="test.csv", schema=["a", "b", "c"])
         select = Select(columns=["a", "b"], inputs=[source])
         filter_op = Filter(predicate="a > 10", inputs=[select])
@@ -622,12 +622,11 @@ class TestOptimizationPasses:
         optimizer = Optimizer()
         optimized_plan = optimizer.optimize(plan)
 
-        # The optimized plan should have Filter before Select
-        # Root should be Select
+        # The optimized plan should have fused the filter into Select
         assert isinstance(optimized_plan.root, Select)
-        # Select's input should be Filter
-        assert len(optimized_plan.root.inputs) == 1
-        assert isinstance(optimized_plan.root.inputs[0], Filter)
+        assert optimized_plan.root.predicate == "a > 10"
+        # Select's input should be Source
+        assert isinstance(optimized_plan.root.inputs[0], Source)
 
     def test_projection_pushdown(self):
         """Projection pushdown drops unused columns early."""
@@ -682,6 +681,42 @@ class TestOptimizationPasses:
         # Should produce same structure
         assert type(optimized_once.root) == type(optimized_twice.root)
         assert optimized_once.root.to_dict() == optimized_twice.root.to_dict()
+
+    def test_fuse_operations(self):
+        """Limit(Sort(Filter(...))) fuses into a single Sort operation."""
+        source = Source(source_id="test.csv", schema=["a", "b"])
+        filter_op = Filter(predicate="a > 5", inputs=[source])
+        sort_op = Sort(keys=[("b", "desc")], inputs=[filter_op])
+        limit_op = Limit(count=10, inputs=[sort_op])
+        plan = LogicalPlan(limit_op)
+
+        optimizer = Optimizer()
+        optimized_plan = optimizer.optimize(plan)
+
+        # Root should be Sort
+        assert isinstance(optimized_plan.root, Sort)
+        # Sort should have limit and predicate
+        assert optimized_plan.root.limit == 10
+        assert optimized_plan.root.predicate == "a > 5"
+        # Input should be Source (Filter fused into Sort)
+        assert isinstance(optimized_plan.root.inputs[0], Source)
+
+    def test_fuse_select_filter(self):
+        """Select(Filter(...)) fuses into a single Select operation."""
+        source = Source(source_id="test.csv", schema=["a", "b"])
+        filter_op = Filter(predicate="a > 5", inputs=[source])
+        select_op = Select(columns=["a"], inputs=[filter_op])
+        plan = LogicalPlan(select_op)
+
+        optimizer = Optimizer()
+        optimized_plan = optimizer.optimize(plan)
+
+        # Root should be Select
+        assert isinstance(optimized_plan.root, Select)
+        # Select should have predicate
+        assert optimized_plan.root.predicate == "a > 5"
+        # Input should be Source
+        assert isinstance(optimized_plan.root.inputs[0], Source)
 
     def test_optimizations_preserve_semantics(self):
         """Optimized plan produces same output for fixed input."""

@@ -247,11 +247,21 @@ def translate_select(op: Select, counter: int, input_sheet: str, input_range: Ra
     # empty trailing rows (which arise when an upstream FILTER returned
     # fewer rows than the statically-allocated range).
     first_col_ref = _col_to_range_ref(input_sheet, input_range, input_schema[0], 0, data_only=True)
+
+    conditions = []
+    conditions.append(f'{first_col_ref}<>""')
+
+    if op.predicate:
+        pred_expr = _translate_predicate(op.predicate, input_sheet, input_range, input_schema)
+        conditions.append(pred_expr)
+
+    full_condition = "*".join(f"({c})" for c in conditions) if len(conditions) > 1 else conditions[0]
+
     if len(col_refs) == 1:
         array_expr = col_refs[0]
     else:
         array_expr = "{" + ", ".join(col_refs) + "}"
-    formula = f"=FILTER({array_expr}, {first_col_ref}<>\"\")"
+    formula = f"=FILTER({array_expr}, {full_condition})"
     operations.append({
         'type': 'set_formula',
         'sheet': sheet_name,
@@ -894,6 +904,9 @@ def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
     num_cols = len(input_schema)
     num_rows = input_range.row_end - input_range.row + 1
 
+    if op.limit:
+        num_rows = min(op.limit, num_rows)
+
     operations = []
 
     # Create sheet
@@ -925,22 +938,46 @@ def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
 
     sort_params_str = ", ".join(sort_params)
 
-    # Wrap in FILTER to exclude empty trailing rows that arise when an
-    # upstream FILTER returned fewer rows than the statically-allocated range.
+    # Build filter condition
+    conditions = []
+
+    # Always filter out empty rows from fixed-range upstream sheets
     first_col_ref = _col_to_range_ref(input_sheet, input_range, input_schema[0], 0, data_only=True)
-    clean_ref = f"FILTER({data_ref}, {first_col_ref}<>\"\")"
-    sort_formula = f"=SORT({clean_ref}, {sort_params_str})"
+    conditions.append(f'{first_col_ref}<>""')
+
+    if op.predicate:
+        # Translate the pushed-down predicate
+        pred_expr = _translate_predicate(op.predicate, input_sheet, input_range, input_schema)
+        conditions.append(pred_expr)
+
+    # Combine conditions with * (AND)
+    if len(conditions) > 1:
+        full_condition = "*".join(f"({c})" for c in conditions)
+    else:
+        full_condition = conditions[0]
+
+    filtered_ref = f"FILTER({data_ref}, {full_condition})"
+    sort_formula = f"SORT({filtered_ref}, {sort_params_str})"
+
+    if op.limit:
+        # Apply limit via ARRAY_CONSTRAIN
+        final_formula = f"=ARRAY_CONSTRAIN({sort_formula}, {op.limit}, {num_cols})"
+        # Update output rows to match limit
+        output_rows = min(op.limit, num_rows)
+    else:
+        final_formula = f"={sort_formula}"
+        output_rows = num_rows
 
     operations.append({
         'type': 'set_formula',
         'sheet': sheet_name,
         'row': 1,
         'col': 0,
-        'formula': sort_formula
+        'formula': final_formula
     })
 
     # Ensure row_end is at least row (handle single row case)
-    output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
+    output_range = Range(row=0, col=0, row_end=output_rows, col_end=num_cols - 1)
 
     return operations, sheet_name, output_range
 

@@ -158,6 +158,7 @@ class Select(Operation):
     """
 
     columns: List[str] = field(default_factory=list)
+    predicate: Any = None  # Optional filter predicate pushed down
     input: Optional[Operation] = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -169,11 +170,17 @@ class Select(Operation):
             raise ValueError("Select operation must specify at least one column")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "type": "select",
             "columns": self.columns,
             "input": self.inputs[0].to_dict(),
         }
+        if self.predicate is not None:
+            pred = self.predicate
+            if hasattr(pred, "to_dict"):
+                pred = pred.to_dict()
+            result["predicate"] = pred
+        return result
 
 
 @dataclass
@@ -270,6 +277,8 @@ class GroupBy(Operation):
 
     keys: List[str] = field(default_factory=list)
     aggregations: List[Tuple[str, str, str]] = field(default_factory=list)
+    sort_keys: Optional[List[Tuple[str, str]]] = None  # Optional sort pushed down
+    limit: Optional[int] = None  # Optional limit pushed down
     input: Optional[Operation] = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -279,14 +288,23 @@ class GroupBy(Operation):
             raise ValueError("GroupBy operation must have exactly one input")
         if not self.aggregations:
             raise ValueError("GroupBy operation must specify at least one aggregation")
+        if self.sort_keys:
+            for col, direction in self.sort_keys:
+                if direction not in ("asc", "desc"):
+                    raise ValueError(f"Sort direction must be 'asc' or 'desc', got: {direction}")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "type": "groupby",
             "keys": self.keys,
             "aggregations": [list(agg) for agg in self.aggregations],
             "input": self.inputs[0].to_dict(),
         }
+        if self.sort_keys:
+            result["sort_keys"] = [list(key) for key in self.sort_keys]
+        if self.limit is not None:
+            result["limit"] = self.limit
+        return result
 
 
 @dataclass
@@ -323,6 +341,8 @@ class Sort(Operation):
     """
 
     keys: List[Tuple[str, str]] = field(default_factory=list)
+    limit: Optional[int] = None
+    predicate: Any = None
     input: Optional[Operation] = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -335,13 +355,23 @@ class Sort(Operation):
         for col, direction in self.keys:
             if direction not in ("asc", "desc"):
                 raise ValueError(f"Sort direction must be 'asc' or 'desc', got: {direction}")
+        if self.limit is not None and self.limit < 0:
+            raise ValueError("Sort limit must be non-negative")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "type": "sort",
             "keys": [list(key) for key in self.keys],
             "input": self.inputs[0].to_dict(),
         }
+        if self.limit is not None:
+            result["limit"] = self.limit
+        if self.predicate is not None:
+            pred = self.predicate
+            if hasattr(pred, "to_dict"):
+                pred = pred.to_dict()
+            result["predicate"] = pred
+        return result
 
 
 @dataclass

@@ -7,10 +7,10 @@ These optimizations operate purely on the plan structure without inspecting data
 - Formula simplification: Eliminate identity operations
 """
 
-from typing import List, Set
+from typing import List, Set, Optional
 from fornero.algebra.operations import (
     Operation, Source, Select, Filter, GroupBy, Aggregate,
-    Sort, WithColumn,
+    Sort, WithColumn, Limit
 )
 from fornero.algebra.logical_plan import LogicalPlan
 
@@ -36,9 +36,67 @@ class Optimizer:
         # Apply optimization passes
         optimized_root = self._predicate_pushdown(optimized_root)
         optimized_root = self._projection_pushdown(optimized_root)
+        optimized_root = self._fuse_operations(optimized_root)
         optimized_root = self._simplify_operations(optimized_root)
 
         return LogicalPlan(optimized_root)
+
+    def _fuse_operations(self, op: Operation) -> Operation:
+        """Fuse adjacent compatible operations.
+
+        Optimizations:
+        - Limit(Sort(...)) -> Sort(..., limit=n)
+        - Sort(Filter(...)) -> Sort(..., predicate=p)
+        """
+        # Recursively optimize inputs first
+        optimized_inputs = [self._fuse_operations(inp) for inp in op.inputs]
+
+        # 1. Limit(Sort) fusion
+        if isinstance(op, Limit):
+            if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Sort):
+                child_sort = optimized_inputs[0]
+                # Push limit into Sort. If Sort already has limit, take the smaller one.
+                new_limit = op.count
+                if child_sort.limit is not None:
+                    new_limit = min(new_limit, child_sort.limit)
+
+                # Clone sort with new limit
+                new_sort = Sort(keys=child_sort.keys, inputs=child_sort.inputs,
+                               limit=new_limit, predicate=child_sort.predicate)
+                return new_sort
+
+        # 2. Sort(Filter) fusion
+        if isinstance(op, Sort):
+            if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
+                child_filter = optimized_inputs[0]
+                # Fuse filter into sort
+                # If Sort already has a predicate (unlikely unless we have multiple layers), AND them.
+                new_pred = child_filter.predicate
+                if op.predicate:
+                    new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+
+                new_sort = Sort(keys=op.keys, inputs=child_filter.inputs,
+                               limit=op.limit, predicate=new_pred)
+                return new_sort
+
+        # 3. Select(Filter) fusion
+        if isinstance(op, Select):
+            if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
+                child_filter = optimized_inputs[0]
+                # Fuse filter into select
+                new_pred = child_filter.predicate
+                if op.predicate:
+                    new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+
+                # Clone select with fused predicate and inputs of filter
+                new_select = Select(columns=op.columns, inputs=child_filter.inputs, predicate=new_pred)
+                return new_select
+
+        # Update with optimized inputs
+        if optimized_inputs != op.inputs:
+            return self._clone_with_inputs(op, optimized_inputs)
+
+        return op
 
     def _predicate_pushdown(self, op: Operation) -> Operation:
         """Push filter predicates down toward sources.

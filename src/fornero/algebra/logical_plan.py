@@ -104,6 +104,12 @@ class LogicalPlan:
         prefix = "  " * indent
         op_type = op.__class__.__name__
 
+        # Import locally to avoid circular imports
+        from .operations import (
+            Source, Select, Filter, Join, GroupBy, Aggregate,
+            Sort, Limit, WithColumn, Pivot, Melt, Window
+        )
+
         # Build operation description
         if isinstance(op, Source):
             desc = f"{prefix}{op_type}(source_id='{op.source_id}'"
@@ -111,77 +117,52 @@ class LogicalPlan:
                 desc += f", schema={op.schema}"
             desc += ")"
 
-        elif hasattr(op, 'columns') and isinstance(op.columns, list):
-            # Select operation
-            from .operations import Select
-            if isinstance(op, Select):
-                desc = f"{prefix}{op_type}(columns={op.columns})"
+        elif isinstance(op, Select):
+            desc = f"{prefix}{op_type}(columns={op.columns}"
+            if hasattr(op, 'predicate') and op.predicate is not None:
+                desc += f", predicate='{op.predicate}'"
+            desc += ")"
 
-        elif hasattr(op, 'predicate'):
-            # Filter operation
-            from .operations import Filter
-            if isinstance(op, Filter):
-                desc = f"{prefix}{op_type}(predicate='{op.predicate}')"
+        elif isinstance(op, Filter):
+            desc = f"{prefix}{op_type}(predicate='{op.predicate}')"
 
-        elif hasattr(op, 'join_type'):
-            # Join operation
-            from .operations import Join
-            if isinstance(op, Join):
-                desc = f"{prefix}{op_type}(left_on={op.left_on}, right_on={op.right_on}, type='{op.join_type}')"
+        elif isinstance(op, Join):
+            desc = f"{prefix}{op_type}(left_on={op.left_on}, right_on={op.right_on}, type='{op.join_type}')"
 
-        elif hasattr(op, 'keys') and hasattr(op, 'aggregations'):
-            # GroupBy operation
-            from .operations import GroupBy
-            if isinstance(op, GroupBy):
-                desc = f"{prefix}{op_type}(keys={op.keys}, aggregations={op.aggregations})"
+        elif isinstance(op, GroupBy):
+            desc = f"{prefix}{op_type}(keys={op.keys}, aggregations={op.aggregations})"
 
-        elif hasattr(op, 'aggregations'):
-            # Aggregate operation
-            from .operations import Aggregate
-            if isinstance(op, Aggregate):
-                desc = f"{prefix}{op_type}(aggregations={op.aggregations})"
+        elif isinstance(op, Aggregate):
+            desc = f"{prefix}{op_type}(aggregations={op.aggregations})"
 
-        elif hasattr(op, 'keys') and isinstance(getattr(op, 'keys', None), list) and len(op.keys) > 0 and isinstance(op.keys[0], (tuple, list)):
-            # Sort operation
-            from .operations import Sort
-            if isinstance(op, Sort):
-                desc = f"{prefix}{op_type}(keys={op.keys})"
+        elif isinstance(op, Sort):
+            desc = f"{prefix}{op_type}(keys={op.keys}"
+            if hasattr(op, 'limit') and op.limit is not None:
+                desc += f", limit={op.limit}"
+            if hasattr(op, 'predicate') and op.predicate is not None:
+                desc += f", predicate='{op.predicate}'"
+            desc += ")"
 
-        elif hasattr(op, 'count') and hasattr(op, 'end'):
-            # Limit operation
-            from .operations import Limit
-            if isinstance(op, Limit):
-                desc = f"{prefix}{op_type}(count={op.count}, end='{op.end}')"
+        elif isinstance(op, Limit):
+            desc = f"{prefix}{op_type}(count={op.count}, end='{op.end}')"
 
-        elif hasattr(op, 'column') and hasattr(op, 'expression'):
-            # WithColumn operation
-            from .operations import WithColumn
-            if isinstance(op, WithColumn):
-                desc = f"{prefix}{op_type}(column='{op.column}', expression='{op.expression}')"
+        elif isinstance(op, WithColumn):
+            desc = f"{prefix}{op_type}(column='{op.column}', expression='{op.expression}')"
 
-        elif hasattr(op, 'index') and hasattr(op, 'values'):
-            # Pivot operation
-            from .operations import Pivot
-            if isinstance(op, Pivot):
-                desc = f"{prefix}{op_type}(index={op.index}, columns='{op.columns}', values='{op.values}')"
+        elif isinstance(op, Pivot):
+            desc = f"{prefix}{op_type}(index={op.index}, columns='{op.columns}', values='{op.values}')"
 
-        elif hasattr(op, 'id_vars') and hasattr(op, 'var_name'):
-            # Melt operation
-            from .operations import Melt
-            if isinstance(op, Melt):
-                value_vars_str = f", value_vars={op.value_vars}" if op.value_vars else ""
-                desc = f"{prefix}{op_type}(id_vars={op.id_vars}{value_vars_str})"
+        elif isinstance(op, Melt):
+            value_vars_str = f", value_vars={op.value_vars}" if op.value_vars else ""
+            desc = f"{prefix}{op_type}(id_vars={op.id_vars}{value_vars_str})"
 
-        elif hasattr(op, 'function') and hasattr(op, 'output_column'):
-            # Window operation
-            from .operations import Window
-            if isinstance(op, Window):
-                desc = f"{prefix}{op_type}(function='{op.function}', output='{op.output_column}'"
-                if op.partition_by:
-                    desc += f", partition_by={op.partition_by}"
-                if op.order_by:
-                    desc += f", order_by={op.order_by}"
-                desc += ")"
+        elif isinstance(op, Window):
+            desc = f"{prefix}{op_type}(function='{op.function}', output='{op.output_column}'"
+            if op.partition_by:
+                desc += f", partition_by={op.partition_by}"
+            if op.order_by:
+                desc += f", order_by={op.order_by}"
+            desc += ")"
 
         else:
             # Generic fallback - Union or unknown operation

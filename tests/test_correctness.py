@@ -373,14 +373,15 @@ class TestOfflineFormulaPatterns:
             for s in derived
         ), "Sort program should produce a SORT() formula"
 
-    def test_groupby_uses_query_formula(self):
+    def test_groupby_uses_unique_sumifs(self):
         from tests.programs import p12_groupby_sum as mod
         executor, _ = self._translate(mod)
         derived = executor.derived_sheets()
         assert any(
-            executor.has_formula_containing(s, "QUERY")
+            executor.has_formula_containing(s, "UNIQUE") or
+            executor.has_formula_containing(s, "SUMIFS")
             for s in derived
-        ), "GroupBy program should produce a QUERY() formula"
+        ), "GroupBy program should produce UNIQUE() or SUMIFS() formulas"
 
     def test_join_uses_xlookup_formula(self):
         from tests.programs import p10_inner_join as mod

@@ -82,7 +82,9 @@ to maintain one dataframe per sheet. The translator tracks which sheet and cell
 range each intermediate result occupies, so downstream formulas can reference
 upstream ranges by name. The output is a flat list of spreadsheet operations
 (`CreateSheet`, `SetValues`, `SetFormula`, `NamedRange`) that fully describe the
-target spreadsheet.
+target spreadsheet. In this algebra, every dataframe operator becomes a sheet
+in the spreadsheet. This can get cumbersome so are various optimization passes
+to fuse operations together to reduce the number of sheets.
 
 Finally, the **executor** takes that list of operations and materialises them in
 a spreadsheet backend. Currently, there is one production backend (for Google
