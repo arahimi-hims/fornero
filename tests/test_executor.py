@@ -206,8 +206,8 @@ class TestSheetsClient:
         client = SheetsClient(mock_gc)
 
         updates = [
-            ("A1:B2", [[1, 2], [3, 4]]),
-            ("D1:E1", [[5, 6]]),
+            {'range': 'A1:B2', 'values': [[1, 2], [3, 4]]},
+            {'range': 'D1:E1', 'values': [[5, 6]]},
         ]
         client.batch_update_values(mock_worksheet, updates)
 
@@ -237,8 +237,8 @@ class TestSheetsClient:
         client = SheetsClient(mock_gc)
 
         updates = [
-            ("A1", "=SUM(B1:B10)"),
-            ("C3", "=AVERAGE(D1:D5)"),
+            {'range': 'A1', 'values': [["=SUM(B1:B10)"]]},
+            {'range': 'C3', 'values': [["=AVERAGE(D1:D5)"]]},
         ]
         client.batch_update_formulas(mock_worksheet, updates)
 

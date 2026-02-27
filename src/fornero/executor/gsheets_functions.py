@@ -284,7 +284,8 @@ def _gsheets_query(data: Any, query_str: Any, *_rest: Any) -> Any:
     group_cols = [c.strip() for c in groupby_clause.split(",")]
 
     select_parts = [p.strip() for p in select_clause.split(",")]
-    agg_map: dict[str, tuple[str, str]] = {}
+    agg_funcs: dict[str, str] = {}  # col -> pandas function name
+    agg_labels: dict[str, str] = {}  # col -> output label
     plain_cols: list[str] = []
 
     for part in select_parts:
@@ -294,7 +295,8 @@ def _gsheets_query(data: Any, query_str: Any, *_rest: Any) -> Any:
             col_name = f"Col{agg_m.group(2)}"
             pd_func = _AGG_FUNCS.get(func_name, func_name.lower())
             out_label = f"{func_name.lower()}_{col_name}"
-            agg_map[col_name] = (pd_func, out_label)
+            agg_funcs[col_name] = pd_func
+            agg_labels[col_name] = out_label
         else:
             col = part.strip()
             if _COL_LETTER_RE.match(col):
@@ -306,13 +308,12 @@ def _gsheets_query(data: Any, query_str: Any, *_rest: Any) -> Any:
         except (ValueError, TypeError):
             pass
 
-    if agg_map:
-        agg_spec = {col: func for col, (func, _) in agg_map.items()}
-        grouped = df.groupby(group_cols, sort=True).agg(agg_spec).reset_index()
+    if agg_funcs:
+        grouped = df.groupby(group_cols, sort=True).agg(agg_funcs).reset_index()
 
         out_header = list(group_cols)
-        for col, (_, label) in agg_map.items():
-            out_header.append(label)
+        for col in agg_labels:
+            out_header.append(agg_labels[col])
 
         result_header = []
         for h in out_header:

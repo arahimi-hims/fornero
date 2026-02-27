@@ -258,7 +258,10 @@ class SheetsExecutor:
                 end_col = start_col + num_cols - 1
                 range_str = self._build_a1_range(start_row, start_col, end_row, end_col)
 
-                batch_updates.append((range_str, op.values))
+                batch_updates.append({
+                    'range': range_str,
+                    'values': op.values
+                })
 
             # Execute batch update with retry
             if batch_updates:
@@ -310,7 +313,10 @@ class SheetsExecutor:
                 # Ensure formula starts with '='
                 formula = op.formula if op.formula.startswith("=") else f"={op.formula}"
 
-                batch_updates.append((cell, formula))
+                batch_updates.append({
+                    'range': cell,
+                    'values': [[formula]]
+                })
 
             # Execute batch update with retry
             if batch_updates:
