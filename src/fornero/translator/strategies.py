@@ -18,8 +18,18 @@ from fornero.spreadsheet.model import Range, Reference
 from fornero.exceptions import UnsupportedOperationError
 
 
-# Type alias for translation result: (operations, output_sheet_name, output_range)
-TranslationResult = Tuple[List[Dict[str, Any]], str, Range]
+@dataclass
+class TranslationResult:
+    """Result of translating an operation to spreadsheet operations.
+
+    Attributes:
+        operations: List of spreadsheet operation dictionaries
+        sheet_name: Name of the output sheet
+        output_range: Range where the output data is located
+    """
+    operations: List[Dict[str, Any]]
+    sheet_name: str
+    output_range: Range
 
 
 @dataclass
@@ -73,6 +83,30 @@ class JoinTranslationContext:
     def num_cols(self) -> int:
         """Get number of output columns."""
         return len(self.output_schema)
+
+
+@dataclass
+class WindowTranslationContext:
+    """Context for translating window operations.
+
+    Attributes:
+        op: Window operation being translated
+        operations: List to append operations to
+        sheet_name: Name of the output sheet
+        input_sheet: Input sheet name
+        input_range: Input data range
+        input_schema: Input column names
+        window_col_idx: Index where window column is appended
+        data_rows: Number of data rows
+    """
+    op: Window
+    operations: List[Dict[str, Any]]
+    sheet_name: str
+    input_sheet: str
+    input_range: Range
+    input_schema: List[str]
+    window_col_idx: int
+    data_rows: int
 
 
 def _generate_sheet_name(op: Operation, counter: int) -> str:
@@ -195,7 +229,7 @@ def translate_source(op: Source, counter: int, data: Any) -> TranslationResult:
     # Range includes all columns from 0 to num_cols-1.
     output_range = Range(row=0, col=0, row_end=max(0, num_rows), col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_select(op: Select, counter: int, input_sheet: str, input_range: Range,
@@ -273,7 +307,7 @@ def translate_select(op: Select, counter: int, input_sheet: str, input_range: Ra
     # Ensure row_end is at least row (handle single row case)
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_filter(op: Filter, counter: int, input_sheet: str, input_range: Range,
@@ -332,7 +366,7 @@ def translate_filter(op: Filter, counter: int, input_sheet: str, input_range: Ra
     # Output range is indeterminate (FILTER spills dynamically)
     output_range = Range(row=0, col=0, row_end=max(0, input_range.row_end - input_range.row), col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def _translate_expression_ast(node: Expression, input_sheet: str, input_range: Range,
@@ -455,185 +489,156 @@ def translate_join(op: Join, counter: int, left_sheet: str, left_range: Range, l
     Returns:
         (operations, sheet_name, output_range)
     """
-    left_key = op.left_on[0] if isinstance(op.left_on, list) else op.left_on
-    right_key = op.right_on[0] if isinstance(op.right_on, list) else op.right_on
-    right_keys = set(op.right_on) if isinstance(op.right_on, list) else {op.right_on}
-
-    output_schema = left_schema.copy()
-    for col in right_schema:
-        if col not in right_keys:
-            output_schema.append(col)
-    num_cols = len(output_schema)
-
-    if op.join_type == 'right':
-        return _translate_right_join(
-            op, counter, left_sheet, left_range, left_schema,
-            right_sheet, right_range, right_schema,
-            left_key, right_key, right_keys, output_schema, num_cols,
-        )
-    if op.join_type == 'outer':
-        return _translate_outer_join(
-            op, counter, left_sheet, left_range, left_schema,
-            right_sheet, right_range, right_schema,
-            left_key, right_key, right_keys, output_schema, num_cols,
-        )
-
-    return _translate_left_or_inner_join(
+    ctx = JoinTranslationContext(
         op, counter, left_sheet, left_range, left_schema,
-        right_sheet, right_range, right_schema,
-        left_key, right_key, right_keys, output_schema, num_cols,
+        right_sheet, right_range, right_schema
     )
 
+    if op.join_type == 'right':
+        return _translate_right_join(ctx)
+    if op.join_type == 'outer':
+        return _translate_outer_join(ctx)
 
-def _translate_left_or_inner_join(
-    op, counter, left_sheet, left_range, left_schema,
-    right_sheet, right_range, right_schema,
-    left_key, right_key, right_keys, output_schema, num_cols,
-) -> TranslationResult:
+    return _translate_left_or_inner_join(ctx)
+
+
+def _translate_left_or_inner_join(ctx: JoinTranslationContext) -> TranslationResult:
     """Left or inner join: R1 is the base, XLOOKUP brings R2 columns."""
-    sheet_name = _generate_sheet_name(op, counter)
-    num_rows = left_range.row_end - left_range.row + 1
+    sheet_name = _generate_sheet_name(ctx.op, ctx.counter)
+    num_rows = ctx.left_range.row_end - ctx.left_range.row + 1
 
     operations = []
-    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': num_rows, 'cols': num_cols})
-    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [output_schema]})
+    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': num_rows, 'cols': ctx.num_cols})
+    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    for j, col_name in enumerate(left_schema):
-        col_ref = _col_to_range_ref(left_sheet, left_range, col_name, j, data_only=True)
+    for j, col_name in enumerate(ctx.left_schema):
+        col_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, j, data_only=True)
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': j, 'formula': f"=ARRAYFORMULA({col_ref})"})
 
-    left_key_idx = left_schema.index(left_key)
-    right_key_idx = right_schema.index(right_key)
-    lookup_array_ref = _col_to_range_ref(left_sheet, left_range, left_key, left_key_idx, data_only=True)
-    lookup_range_ref = _col_to_range_ref(right_sheet, right_range, right_key, right_key_idx, data_only=True)
+    left_key_idx = ctx.left_schema.index(ctx.left_key)
+    right_key_idx = ctx.right_schema.index(ctx.right_key)
+    lookup_array_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
+    lookup_range_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
 
-    current_col = len(left_schema)
-    for col_name in right_schema:
-        if col_name in right_keys:
+    current_col = len(ctx.left_schema)
+    for col_name in ctx.right_schema:
+        if col_name in ctx.right_keys:
             continue
-        col_idx = right_schema.index(col_name)
-        return_array_ref = _col_to_range_ref(right_sheet, right_range, col_name, col_idx, data_only=True)
+        col_idx = ctx.right_schema.index(col_name)
+        return_array_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
         xlookup_formula = f'=ARRAYFORMULA(XLOOKUP({lookup_array_ref}, {lookup_range_ref}, {return_array_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': current_col, 'formula': xlookup_formula})
         current_col += 1
 
-    intermediate_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
+    intermediate_range = Range(row=0, col=0, row_end=num_rows, col_end=ctx.num_cols - 1)
 
-    if op.join_type == 'inner':
+    if ctx.op.join_type == 'inner':
         helper_sheet = f"{sheet_name}_filtered"
-        operations.append({'type': 'create_sheet', 'name': helper_sheet, 'rows': num_rows, 'cols': num_cols})
-        operations.append({'type': 'set_values', 'sheet': helper_sheet, 'row': 0, 'col': 0, 'values': [output_schema]})
+        operations.append({'type': 'create_sheet', 'name': helper_sheet, 'rows': num_rows, 'cols': ctx.num_cols})
+        operations.append({'type': 'set_values', 'sheet': helper_sheet, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-        right_non_key_cols = [c for c in right_schema if c not in right_keys]
+        right_non_key_cols = [c for c in ctx.right_schema if c not in ctx.right_keys]
         if right_non_key_cols:
             intermediate_data_ref = _full_range_ref(sheet_name, intermediate_range, data_only=True)
             checks = []
             for col in right_non_key_cols:
-                col_idx = output_schema.index(col)
+                col_idx = ctx.output_schema.index(col)
                 col_ref = _col_to_range_ref(sheet_name, intermediate_range, col, col_idx, data_only=True)
                 checks.append(f'({col_ref}<>"")')
             condition = "+".join(checks)
             filter_formula = f'=FILTER({intermediate_data_ref}, {condition})'
             operations.append({'type': 'set_formula', 'sheet': helper_sheet, 'row': 1, 'col': 0, 'formula': filter_formula})
 
-        output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
-        return operations, helper_sheet, output_range
+        output_range = Range(row=0, col=0, row_end=num_rows, col_end=ctx.num_cols - 1)
+        return TranslationResult(operations, helper_sheet, output_range)
 
-    return operations, sheet_name, intermediate_range
+    return TranslationResult(operations, sheet_name, intermediate_range)
 
 
-def _translate_right_join(
-    op, counter, left_sheet, left_range, left_schema,
-    right_sheet, right_range, right_schema,
-    left_key, right_key, right_keys, output_schema, num_cols,
-) -> TranslationResult:
+def _translate_right_join(ctx: JoinTranslationContext) -> TranslationResult:
     """Right join: R2 is the base, XLOOKUP brings R1 columns (symmetric with left)."""
-    sheet_name = _generate_sheet_name(op, counter)
-    num_rows = right_range.row_end - right_range.row + 1
+    sheet_name = _generate_sheet_name(ctx.op, ctx.counter)
+    num_rows = ctx.right_range.row_end - ctx.right_range.row + 1
 
     operations = []
-    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': num_rows, 'cols': num_cols})
-    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [output_schema]})
+    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': num_rows, 'cols': ctx.num_cols})
+    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    left_key_idx = left_schema.index(left_key)
-    right_key_idx = right_schema.index(right_key)
-    lookup_array_ref = _col_to_range_ref(right_sheet, right_range, right_key, right_key_idx, data_only=True)
-    search_range_ref = _col_to_range_ref(left_sheet, left_range, left_key, left_key_idx, data_only=True)
+    left_key_idx = ctx.left_schema.index(ctx.left_key)
+    right_key_idx = ctx.right_schema.index(ctx.right_key)
+    lookup_array_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
+    search_range_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
 
-    for j, col_name in enumerate(left_schema):
-        col_idx = left_schema.index(col_name)
-        return_ref = _col_to_range_ref(left_sheet, left_range, col_name, col_idx, data_only=True)
+    for j, col_name in enumerate(ctx.left_schema):
+        col_idx = ctx.left_schema.index(col_name)
+        return_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, col_idx, data_only=True)
         xlookup = f'=ARRAYFORMULA(XLOOKUP({lookup_array_ref}, {search_range_ref}, {return_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': j, 'formula': xlookup})
 
-    current_col = len(left_schema)
-    for col_name in right_schema:
-        if col_name in right_keys:
+    current_col = len(ctx.left_schema)
+    for col_name in ctx.right_schema:
+        if col_name in ctx.right_keys:
             continue
-        col_idx = right_schema.index(col_name)
-        col_ref = _col_to_range_ref(right_sheet, right_range, col_name, col_idx, data_only=True)
+        col_idx = ctx.right_schema.index(col_name)
+        col_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': current_col, 'formula': f"=ARRAYFORMULA({col_ref})"})
         current_col += 1
 
-    output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
-    return operations, sheet_name, output_range
+    output_range = Range(row=0, col=0, row_end=num_rows, col_end=ctx.num_cols - 1)
+    return TranslationResult(operations, sheet_name, output_range)
 
 
-def _translate_outer_join(
-    op, counter, left_sheet, left_range, left_schema,
-    right_sheet, right_range, right_schema,
-    left_key, right_key, right_keys, output_schema, num_cols,
-) -> TranslationResult:
+def _translate_outer_join(ctx: JoinTranslationContext) -> TranslationResult:
     """Outer join: left join + anti-join of unmatched R2 rows, unioned.
 
     Sheet 1 (left part): left join result — all R1 rows with XLOOKUP for R2.
     Sheet 2 (anti-join): R2 rows where key not in R1, with R1 columns null.
     Sheet 3 (output):    vertical union of sheets 1 and 2.
     """
-    sheet_name = _generate_sheet_name(op, counter)
+    sheet_name = _generate_sheet_name(ctx.op, ctx.counter)
     left_part = f"{sheet_name}_left"
     anti_part = f"{sheet_name}_anti"
 
-    left_key_idx = left_schema.index(left_key)
-    right_key_idx = right_schema.index(right_key)
-    left_num_rows = left_range.row_end - left_range.row + 1
-    right_num_rows = right_range.row_end - right_range.row + 1
+    left_key_idx = ctx.left_schema.index(ctx.left_key)
+    right_key_idx = ctx.right_schema.index(ctx.right_key)
+    left_num_rows = ctx.left_range.row_end - ctx.left_range.row + 1
+    right_num_rows = ctx.right_range.row_end - ctx.right_range.row + 1
 
     operations = []
 
     # Sheet 1: left join (reuse the left-join logic inline)
-    operations.append({'type': 'create_sheet', 'name': left_part, 'rows': left_num_rows, 'cols': num_cols})
-    operations.append({'type': 'set_values', 'sheet': left_part, 'row': 0, 'col': 0, 'values': [output_schema]})
+    operations.append({'type': 'create_sheet', 'name': left_part, 'rows': left_num_rows, 'cols': ctx.num_cols})
+    operations.append({'type': 'set_values', 'sheet': left_part, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    for j, col_name in enumerate(left_schema):
-        col_ref = _col_to_range_ref(left_sheet, left_range, col_name, j, data_only=True)
+    for j, col_name in enumerate(ctx.left_schema):
+        col_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, j, data_only=True)
         operations.append({'type': 'set_formula', 'sheet': left_part, 'row': 1, 'col': j, 'formula': f"=ARRAYFORMULA({col_ref})"})
 
-    lookup_array = _col_to_range_ref(left_sheet, left_range, left_key, left_key_idx, data_only=True)
-    search_range = _col_to_range_ref(right_sheet, right_range, right_key, right_key_idx, data_only=True)
+    lookup_array = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
+    search_range = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
 
-    current_col = len(left_schema)
-    for col_name in right_schema:
-        if col_name in right_keys:
+    current_col = len(ctx.left_schema)
+    for col_name in ctx.right_schema:
+        if col_name in ctx.right_keys:
             continue
-        col_idx = right_schema.index(col_name)
-        ret_ref = _col_to_range_ref(right_sheet, right_range, col_name, col_idx, data_only=True)
+        col_idx = ctx.right_schema.index(col_name)
+        ret_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
         xlookup = f'=ARRAYFORMULA(XLOOKUP({lookup_array}, {search_range}, {ret_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': left_part, 'row': 1, 'col': current_col, 'formula': xlookup})
         current_col += 1
 
-    left_part_range = Range(row=0, col=0, row_end=left_num_rows, col_end=num_cols - 1)
+    left_part_range = Range(row=0, col=0, row_end=left_num_rows, col_end=ctx.num_cols - 1)
 
     # Sheet 2: anti-join — R2 rows whose key is not in R1
-    operations.append({'type': 'create_sheet', 'name': anti_part, 'rows': right_num_rows, 'cols': num_cols})
-    operations.append({'type': 'set_values', 'sheet': anti_part, 'row': 0, 'col': 0, 'values': [output_schema]})
+    operations.append({'type': 'create_sheet', 'name': anti_part, 'rows': right_num_rows, 'cols': ctx.num_cols})
+    operations.append({'type': 'set_values', 'sheet': anti_part, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    r2_key_ref = _col_to_range_ref(right_sheet, right_range, right_key, right_key_idx, data_only=True)
-    r1_key_ref = _col_to_range_ref(left_sheet, left_range, left_key, left_key_idx, data_only=True)
+    r2_key_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
+    r1_key_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
     anti_condition = f"ISNA(XMATCH({r2_key_ref}, {r1_key_ref}))"
 
-    for j, col_name in enumerate(output_schema):
-        if col_name in left_schema:
+    for j, col_name in enumerate(ctx.output_schema):
+        if col_name in ctx.left_schema:
             # R1 columns are null for unmatched R2 rows — fill with empty strings
             # Use IF(condition, "", "") wrapped in ARRAYFORMULA so it spills to the
             # correct number of rows matching the FILTER output.
@@ -641,25 +646,25 @@ def _translate_outer_join(
             pass
         else:
             # R2 non-key column — FILTER to keep only unmatched rows
-            r2_col_idx = right_schema.index(col_name)
-            r2_col_ref = _col_to_range_ref(right_sheet, right_range, col_name, r2_col_idx, data_only=True)
+            r2_col_idx = ctx.right_schema.index(col_name)
+            r2_col_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, r2_col_idx, data_only=True)
             formula = f"=FILTER({r2_col_ref}, {anti_condition})"
             operations.append({'type': 'set_formula', 'sheet': anti_part, 'row': 1, 'col': j, 'formula': formula})
 
-    anti_part_range = Range(row=0, col=0, row_end=right_num_rows, col_end=num_cols - 1)
+    anti_part_range = Range(row=0, col=0, row_end=right_num_rows, col_end=ctx.num_cols - 1)
 
     # Sheet 3: union of left part and anti-join part
     total_rows = left_num_rows + right_num_rows
-    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': total_rows, 'cols': num_cols})
-    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [output_schema]})
+    operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': total_rows, 'cols': ctx.num_cols})
+    operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
     left_data_ref = _full_range_ref(left_part, left_part_range, data_only=True)
     anti_data_ref = _full_range_ref(anti_part, anti_part_range, data_only=True)
     union_formula = f"={{{left_data_ref}; {anti_data_ref}}}"
     operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': 0, 'formula': union_formula})
 
-    output_range = Range(row=0, col=0, row_end=total_rows, col_end=num_cols - 1)
-    return operations, sheet_name, output_range
+    output_range = Range(row=0, col=0, row_end=total_rows, col_end=ctx.num_cols - 1)
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: Range,
@@ -812,7 +817,7 @@ def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: 
             })
 
     output_range = Range(row=0, col=0, row_end=max_output_rows, col_end=num_cols - 1)
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 def translate_aggregate(op: Aggregate, counter: int, input_sheet: str, input_range: Range,
                        input_schema: List[str]) -> TranslationResult:
@@ -883,7 +888,7 @@ def translate_aggregate(op: Aggregate, counter: int, input_sheet: str, input_ran
 
     output_range = Range(row=0, col=0, row_end=2, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
@@ -979,7 +984,7 @@ def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
     # Ensure row_end is at least row (handle single row case)
     output_range = Range(row=0, col=0, row_end=output_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_limit(op: Limit, counter: int, input_sheet: str, input_range: Range,
@@ -1037,7 +1042,7 @@ def translate_limit(op: Limit, counter: int, input_sheet: str, input_range: Rang
     # Ensure row_end is at least row (handle single row case)
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_with_column(op: WithColumn, counter: int, input_sheet: str, input_range: Range,
@@ -1121,7 +1126,7 @@ def translate_with_column(op: WithColumn, counter: int, input_sheet: str, input_
     # Ensure row_end is at least row (handle single row case)
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def _translate_expression(expr, input_sheet: str, input_range: Range,
@@ -1219,7 +1224,7 @@ def translate_union(op: Union, counter: int, left_sheet: str, left_range: Range,
     # Ensure row_end is at least row (handle single row case)
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 _MAX_PIVOT_COLS = 50
@@ -1353,7 +1358,7 @@ def translate_pivot(op: Pivot, counter: int, input_sheet: str, input_range: Rang
             })
 
     output_range = Range(row=0, col=0, row_end=n_rows + 1, col_end=n_cols)
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_melt(op: Melt, counter: int, input_sheet: str, input_range: Range,
@@ -1471,7 +1476,7 @@ def translate_melt(op: Melt, counter: int, input_sheet: str, input_range: Range,
 
     output_range = Range(row=0, col=0, row_end=num_output_rows + 1, col_end=num_output_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
 def translate_window(op: Window, counter: int, input_sheet: str, input_range: Range,
@@ -1542,21 +1547,18 @@ def translate_window(op: Window, counter: int, input_sheet: str, input_range: Ra
 
     data_rows = input_range.row_end - input_range.row  # number of data rows
 
+    # Create context for window helper functions
+    ctx = WindowTranslationContext(
+        op, operations, sheet_name, input_sheet, input_range,
+        input_schema, window_col_idx, data_rows
+    )
+
     if op.function in ranking_funcs:
-        _translate_window_ranking(
-            op, operations, sheet_name, input_sheet, input_range,
-            input_schema, window_col_idx, data_rows
-        )
+        _translate_window_ranking(ctx)
     elif op.function in running_agg_funcs:
-        _translate_window_running_agg(
-            op, operations, sheet_name, input_sheet, input_range,
-            input_schema, window_col_idx, data_rows
-        )
+        _translate_window_running_agg(ctx)
     elif op.function in lag_lead_funcs:
-        _translate_window_lag_lead(
-            op, operations, sheet_name, input_sheet, input_range,
-            input_schema, window_col_idx, data_rows
-        )
+        _translate_window_lag_lead(ctx)
     else:
         raise UnsupportedOperationError(
             f"Window function '{op.function}' cannot be expressed as a spreadsheet formula. "
@@ -1565,14 +1567,10 @@ def translate_window(op: Window, counter: int, input_sheet: str, input_range: Ra
 
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=num_cols - 1)
 
-    return operations, sheet_name, output_range
+    return TranslationResult(operations, sheet_name, output_range)
 
 
-def _translate_window_ranking(
-    op: Window, operations: List[Dict[str, Any]], sheet_name: str,
-    input_sheet: str, input_range: Range, input_schema: List[str],
-    window_col_idx: int, data_rows: int
-) -> None:
+def _translate_window_ranking(ctx: WindowTranslationContext) -> None:
     """Generate COUNTIFS-based ranking formulas for each data row.
 
     For ``rank``, uses ``<=`` (or ``>=`` for descending) so tied values share
@@ -1580,26 +1578,26 @@ def _translate_window_ranking(
     a tie-break COUNTIFS that compares ROW positions, guaranteeing unique
     sequential numbers.
     """
-    is_row_number = op.function == 'row_number'
+    is_row_number = ctx.op.function == 'row_number'
 
-    for i in range(data_rows):
+    for i in range(ctx.data_rows):
         row_in_sheet = 2 + i  # 1-indexed, row 1 is header, data starts at row 2
 
         countifs_args = []
         partition_args: List[str] = []
 
-        for part_col in op.partition_by:
-            p_idx = input_schema.index(part_col)
-            part_range = _col_to_range_ref(input_sheet, input_range, part_col, p_idx, data_only=True)
-            part_cell_letter = Range._col_to_letter(input_range.col + p_idx)
-            part_pair = f"{part_range}, {sheet_name}!{part_cell_letter}{row_in_sheet}"
+        for part_col in ctx.op.partition_by:
+            p_idx = ctx.input_schema.index(part_col)
+            part_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, part_col, p_idx, data_only=True)
+            part_cell_letter = Range._col_to_letter(ctx.input_range.col + p_idx)
+            part_pair = f"{part_range}, {ctx.sheet_name}!{part_cell_letter}{row_in_sheet}"
             countifs_args.append(part_pair)
             partition_args.append(part_pair)
 
-        for order_col, order_dir in op.order_by:
-            o_idx = input_schema.index(order_col)
-            order_range = _col_to_range_ref(input_sheet, input_range, order_col, o_idx, data_only=True)
-            order_cell_letter = Range._col_to_letter(input_range.col + o_idx)
+        for order_col, order_dir in ctx.op.order_by:
+            o_idx = ctx.input_schema.index(order_col)
+            order_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, order_col, o_idx, data_only=True)
+            order_cell_letter = Range._col_to_letter(ctx.input_range.col + o_idx)
 
             if is_row_number:
                 op_str = "<" if order_dir == 'asc' else ">"
@@ -1607,20 +1605,20 @@ def _translate_window_ranking(
                 op_str = "<=" if order_dir == 'asc' else ">="
 
             countifs_args.append(
-                f'{order_range}, "{op_str}"&{sheet_name}!{order_cell_letter}{row_in_sheet}'
+                f'{order_range}, "{op_str}"&{ctx.sheet_name}!{order_cell_letter}{row_in_sheet}'
             )
 
         args_str = ", ".join(countifs_args)
 
         if is_row_number:
             tiebreak_args = list(partition_args)
-            for order_col, _order_dir in op.order_by:
-                o_idx = input_schema.index(order_col)
+            for order_col, _order_dir in ctx.op.order_by:
+                o_idx = ctx.input_schema.index(order_col)
                 order_range = _col_to_range_ref(
-                    input_sheet, input_range, order_col, o_idx, data_only=True,
+                    ctx.input_sheet, ctx.input_range, order_col, o_idx, data_only=True,
                 )
-                order_cell_letter = Range._col_to_letter(input_range.col + o_idx)
-                cell_ref = f"{sheet_name}!{order_cell_letter}{row_in_sheet}"
+                order_cell_letter = Range._col_to_letter(ctx.input_range.col + o_idx)
+                cell_ref = f"{ctx.sheet_name}!{order_cell_letter}{row_in_sheet}"
                 tiebreak_args.append(f"{order_range}, {cell_ref}")
                 tiebreak_args.append(
                     f'ROW({order_range}), "<="&ROW({cell_ref})'
@@ -1630,25 +1628,21 @@ def _translate_window_ranking(
         else:
             formula = f"=COUNTIFS({args_str})"
 
-        operations.append({
+        ctx.operations.append({
             'type': 'set_formula',
-            'sheet': sheet_name,
+            'sheet': ctx.sheet_name,
             'row': row_in_sheet - 1,  # 0-indexed for the operation dict
-            'col': window_col_idx,
+            'col': ctx.window_col_idx,
             'formula': formula
         })
 
 
-def _translate_window_running_agg(
-    op: Window, operations: List[Dict[str, Any]], sheet_name: str,
-    input_sheet: str, input_range: Range, input_schema: List[str],
-    window_col_idx: int, data_rows: int
-) -> None:
+def _translate_window_running_agg(ctx: WindowTranslationContext) -> None:
     """Generate conditional aggregate formulas (SUMIFS, AVERAGEIFS, etc.) for each data row."""
     # Only support unbounded preceding to current row frame
-    if op.frame and op.frame not in ('unbounded preceding to current row', None):
+    if ctx.op.frame and ctx.op.frame not in ('unbounded preceding to current row', None):
         raise UnsupportedOperationError(
-            f"Window frame '{op.frame}' not supported. "
+            f"Window frame '{ctx.op.frame}' not supported. "
             "Only 'unbounded preceding to current row' is supported."
         )
 
@@ -1659,100 +1653,96 @@ def _translate_window_running_agg(
         'min': 'MINIFS',
         'max': 'MAXIFS',
     }
-    sheets_func = func_map[op.function]
+    sheets_func = func_map[ctx.op.function]
 
-    input_col = op.input_column
+    input_col = ctx.op.input_column
     if not input_col:
         raise UnsupportedOperationError(
-            f"Running aggregate window function '{op.function}' requires an input column"
+            f"Running aggregate window function '{ctx.op.function}' requires an input column"
         )
 
-    c_idx = input_schema.index(input_col)
-    agg_range = _col_to_range_ref(input_sheet, input_range, input_col, c_idx, data_only=True)
+    c_idx = ctx.input_schema.index(input_col)
+    agg_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, input_col, c_idx, data_only=True)
 
-    for i in range(data_rows):
+    for i in range(ctx.data_rows):
         row_in_sheet = 2 + i
 
         criteria_args = []
 
         # For SUMIFS/etc., the first arg is the sum_range, then pairs of (criteria_range, criteria)
         # Partition key criteria
-        for part_col in op.partition_by:
-            p_idx = input_schema.index(part_col)
-            part_range = _col_to_range_ref(input_sheet, input_range, part_col, p_idx, data_only=True)
-            part_cell_letter = Range._col_to_letter(input_range.col + p_idx)
+        for part_col in ctx.op.partition_by:
+            p_idx = ctx.input_schema.index(part_col)
+            part_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, part_col, p_idx, data_only=True)
+            part_cell_letter = Range._col_to_letter(ctx.input_range.col + p_idx)
             criteria_args.append(
-                f"{part_range}, {sheet_name}!{part_cell_letter}{row_in_sheet}"
+                f"{part_range}, {ctx.sheet_name}!{part_cell_letter}{row_in_sheet}"
             )
 
         # Order key criteria (include rows up to current row)
-        for order_col, order_dir in op.order_by:
-            o_idx = input_schema.index(order_col)
-            order_range = _col_to_range_ref(input_sheet, input_range, order_col, o_idx, data_only=True)
-            order_cell_letter = Range._col_to_letter(input_range.col + o_idx)
+        for order_col, order_dir in ctx.op.order_by:
+            o_idx = ctx.input_schema.index(order_col)
+            order_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, order_col, o_idx, data_only=True)
+            order_cell_letter = Range._col_to_letter(ctx.input_range.col + o_idx)
             op_str = "<=" if order_dir == 'asc' else ">="
             criteria_args.append(
-                f'{order_range}, "{op_str}"&{sheet_name}!{order_cell_letter}{row_in_sheet}'
+                f'{order_range}, "{op_str}"&{ctx.sheet_name}!{order_cell_letter}{row_in_sheet}'
             )
 
         criteria_str = ", ".join(criteria_args)
         formula = f"={sheets_func}({agg_range}, {criteria_str})"
 
-        operations.append({
+        ctx.operations.append({
             'type': 'set_formula',
-            'sheet': sheet_name,
+            'sheet': ctx.sheet_name,
             'row': row_in_sheet - 1,
-            'col': window_col_idx,
+            'col': ctx.window_col_idx,
             'formula': formula
         })
 
 
-def _translate_window_lag_lead(
-    op: Window, operations: List[Dict[str, Any]], sheet_name: str,
-    input_sheet: str, input_range: Range, input_schema: List[str],
-    window_col_idx: int, data_rows: int
-) -> None:
+def _translate_window_lag_lead(ctx: WindowTranslationContext) -> None:
     """Generate IFERROR(OFFSET(...)) formulas for lag/lead window functions."""
-    if op.partition_by:
+    if ctx.op.partition_by:
         raise UnsupportedOperationError(
-            f"Partition-aware {op.function} cannot be expressed as a spreadsheet "
+            f"Partition-aware {ctx.op.function} cannot be expressed as a spreadsheet "
             "formula because OFFSET would cross partition boundaries. "
             "Remove partition_by or compute this column in pandas."
         )
 
-    input_col = op.input_column
+    input_col = ctx.op.input_column
     if not input_col:
         raise UnsupportedOperationError(
-            f"Window function '{op.function}' requires an input column"
+            f"Window function '{ctx.op.function}' requires an input column"
         )
 
     # Extract offset from frame spec (default: 1)
     offset = 1
-    if op.frame:
+    if ctx.op.frame:
         try:
-            offset = int(op.frame)
+            offset = int(ctx.op.frame)
         except ValueError:
             offset = 1
 
-    c_idx = input_schema.index(input_col)
+    c_idx = ctx.input_schema.index(input_col)
     input_col_in_output = c_idx  # position in the output sheet
 
-    for i in range(data_rows):
+    for i in range(ctx.data_rows):
         row_in_sheet = 2 + i
 
         # Cell holding the input column value for the current row
         col_letter = Range._col_to_letter(1 + input_col_in_output)  # 1-indexed
-        cell_ref = f"{sheet_name}!{col_letter}{row_in_sheet}"
+        cell_ref = f"{ctx.sheet_name}!{col_letter}{row_in_sheet}"
 
         # delta: +offset for lead, -offset for lag
-        delta = offset if op.function == 'lead' else -offset
+        delta = offset if ctx.op.function == 'lead' else -offset
 
         formula = f'=IFERROR(OFFSET({cell_ref}, {delta}, 0), "")'
 
-        operations.append({
+        ctx.operations.append({
             'type': 'set_formula',
-            'sheet': sheet_name,
+            'sheet': ctx.sheet_name,
             'row': row_in_sheet - 1,
-            'col': window_col_idx,
+            'col': ctx.window_col_idx,
             'formula': formula
         })

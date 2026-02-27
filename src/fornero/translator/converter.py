@@ -193,46 +193,46 @@ class Translator:
         """Translate a Source operation."""
         data = source_data.get(op.source_id, [])
 
-        ops, sheet_name, output_range = strategies.translate_source(op, self.counter, data)
+        result = strategies.translate_source(op, self.counter, data)
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, op.schema or [])
+        return MaterializationContext(result.sheet_name, result.output_range, op.schema or [])
 
     def _translate_select(self, op: Select, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Select operation."""
-        ops, sheet_name, output_range = strategies.translate_select(
+        result = strategies.translate_select(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, op.columns)
+        return MaterializationContext(result.sheet_name, result.output_range, op.columns)
 
     def _translate_filter(self, op: Filter, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Filter operation."""
-        ops, sheet_name, output_range = strategies.translate_filter(
+        result = strategies.translate_filter(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, input_ctx.schema)
+        return MaterializationContext(result.sheet_name, result.output_range, input_ctx.schema)
 
     def _translate_join(self, op: Join, left_ctx: MaterializationContext,
                        right_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Join operation."""
-        ops, sheet_name, output_range = strategies.translate_join(
+        result = strategies.translate_join(
             op, self.counter,
             left_ctx.sheet_name, left_ctx.output_range, left_ctx.schema,
             right_ctx.sheet_name, right_ctx.output_range, right_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         right_keys = set(op.right_on) if isinstance(op.right_on, list) else {op.right_on}
         output_schema = left_ctx.schema.copy()
@@ -240,68 +240,68 @@ class Translator:
             if col not in right_keys:
                 output_schema.append(col)
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     def _translate_groupby(self, op: GroupBy, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a GroupBy operation."""
-        ops, sheet_name, output_range = strategies.translate_groupby(
+        result = strategies.translate_groupby(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Output schema: keys + aggregation outputs
         output_schema = op.keys.copy()
         for agg_name, _, _ in op.aggregations:
             output_schema.append(agg_name)
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     def _translate_aggregate(self, op: Aggregate, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate an Aggregate operation."""
-        ops, sheet_name, output_range = strategies.translate_aggregate(
+        result = strategies.translate_aggregate(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Output schema: aggregation output names
         output_schema = [agg_name for agg_name, _, _ in op.aggregations]
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     def _translate_sort(self, op: Sort, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Sort operation."""
-        ops, sheet_name, output_range = strategies.translate_sort(
+        result = strategies.translate_sort(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, input_ctx.schema)
+        return MaterializationContext(result.sheet_name, result.output_range, input_ctx.schema)
 
     def _translate_limit(self, op: Limit, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Limit operation."""
-        ops, sheet_name, output_range = strategies.translate_limit(
+        result = strategies.translate_limit(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, input_ctx.schema)
+        return MaterializationContext(result.sheet_name, result.output_range, input_ctx.schema)
 
     def _translate_with_column(self, op: WithColumn, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a WithColumn operation."""
-        ops, sheet_name, output_range = strategies.translate_with_column(
+        result = strategies.translate_with_column(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Output schema: existing columns + new/replaced column
         if op.column in input_ctx.schema:
@@ -309,21 +309,21 @@ class Translator:
         else:
             output_schema = input_ctx.schema + [op.column]
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     def _translate_union(self, op: Union, left_ctx: MaterializationContext,
                         right_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Union operation."""
-        ops, sheet_name, output_range = strategies.translate_union(
+        result = strategies.translate_union(
             op, self.counter,
             left_ctx.sheet_name, left_ctx.output_range, left_ctx.schema,
             right_ctx.sheet_name, right_ctx.output_range, right_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
-        return MaterializationContext(sheet_name, output_range, left_ctx.schema)
+        return MaterializationContext(result.sheet_name, result.output_range, left_ctx.schema)
 
     def _translate_pivot(self, op: Pivot, input_ctx: MaterializationContext,
                          source_data: Dict[str, Any]) -> MaterializationContext:
@@ -331,19 +331,19 @@ class Translator:
         num_pivot_values = self._count_distinct_pivot_values(op, source_data)
         num_index_values = self._count_distinct_index_values(op, source_data)
 
-        ops, sheet_name, output_range = strategies.translate_pivot(
+        result = strategies.translate_pivot(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema,
             num_pivot_values=num_pivot_values,
             num_index_values=num_index_values,
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Pivot output schema is dynamic - placeholder
         output_schema = []
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     @staticmethod
     def _count_distinct_pivot_values(op: Pivot, source_data: Dict[str, Any]) -> Optional[int]:
@@ -379,28 +379,28 @@ class Translator:
 
     def _translate_melt(self, op: Melt, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Melt operation."""
-        ops, sheet_name, output_range = strategies.translate_melt(
+        result = strategies.translate_melt(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Melt output schema: id_vars + var_name + value_name
         output_schema = op.id_vars + [op.var_name, op.value_name]
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
 
     def _translate_window(self, op: Window, input_ctx: MaterializationContext) -> MaterializationContext:
         """Translate a Window operation."""
-        ops, sheet_name, output_range = strategies.translate_window(
+        result = strategies.translate_window(
             op, self.counter, input_ctx.sheet_name, input_ctx.output_range, input_ctx.schema
         )
         self.counter += 1
 
-        self.operations.extend(ops)
+        self.operations.extend(result.operations)
 
         # Window output schema: all columns + output_column
         output_schema = input_ctx.schema + [op.output_column]
 
-        return MaterializationContext(sheet_name, output_range, output_schema)
+        return MaterializationContext(result.sheet_name, result.output_range, output_schema)
