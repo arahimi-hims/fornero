@@ -9,7 +9,8 @@ The tracer is designed to work in dual mode: operations execute normally in pand
 while simultaneously recording their intent in the logical plan.
 """
 
-from typing import Union, List, Optional
+from __future__ import annotations
+
 from ..algebra import (
     LogicalPlan,
     Source,
@@ -25,7 +26,7 @@ from ..algebra import (
 )
 
 
-def trace_filter(df, condition, predicate_str: Optional[str] = None) -> LogicalPlan:
+def trace_filter(df, condition, predicate_str: str | None = None) -> LogicalPlan:
     """Trace a filter operation.
 
     Args:
@@ -47,7 +48,7 @@ def trace_filter(df, condition, predicate_str: Optional[str] = None) -> LogicalP
     return LogicalPlan(filter_op)
 
 
-def trace_select(df, columns: List[str]) -> LogicalPlan:
+def trace_select(df, columns: list[str]) -> LogicalPlan:
     """Trace a column selection operation.
 
     Args:
@@ -61,7 +62,7 @@ def trace_select(df, columns: List[str]) -> LogicalPlan:
     return LogicalPlan(select_op)
 
 
-def trace_sort(df, by: Union[str, List[str]], ascending: Union[bool, List[bool]] = True) -> LogicalPlan:
+def trace_sort(df, by: str | list[str], ascending: bool | list[bool] = True) -> LogicalPlan:
     """Trace a sort operation.
 
     Args:
@@ -102,8 +103,8 @@ def trace_limit(df, count: int, end: str = "head") -> LogicalPlan:
 
 def trace_groupby(
     df,
-    keys: Union[str, List[str]],
-    aggregations: List[tuple]
+    keys: str | list[str],
+    aggregations: list[tuple]
 ) -> LogicalPlan:
     """Trace a groupby operation.
 
@@ -123,7 +124,7 @@ def trace_groupby(
     return LogicalPlan(groupby_op)
 
 
-def trace_aggregate(df, aggregations: List[tuple]) -> LogicalPlan:
+def trace_aggregate(df, aggregations: list[tuple]) -> LogicalPlan:
     """Trace a global aggregation operation (no grouping).
 
     Args:
@@ -155,8 +156,8 @@ def trace_with_column(df, column: str, expression: str) -> LogicalPlan:
 def trace_join(
     left_df,
     right_df,
-    left_on: Union[str, List[str]],
-    right_on: Union[str, List[str]],
+    left_on: str | list[str],
+    right_on: str | list[str],
     join_type: str = "inner",
     suffixes: tuple = ("_x", "_y")
 ) -> LogicalPlan:

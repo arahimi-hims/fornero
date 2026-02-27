@@ -13,7 +13,7 @@ Binary operations (Join, Union) accept ``left=`` / ``right=`` as shorthand for
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Union, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum
 
 import pandas as pd
@@ -221,14 +221,14 @@ class Join(Operation):
     ``how`` → ``join_type``.
     """
 
-    left_on: Union[str, List[str]] = ""
-    right_on: Union[str, List[str]] = ""
+    left_on: str | list[str] = ""
+    right_on: str | list[str] = ""
     join_type: str = "inner"
     suffixes: Tuple[str, str] = ("_x", "_y")
     left: Optional[Operation] = field(default=None, repr=False)
     right: Optional[Operation] = field(default=None, repr=False)
-    left_key: Optional[Union[str, List[str]]] = field(default=None, repr=False)
-    right_key: Optional[Union[str, List[str]]] = field(default=None, repr=False)
+    left_key: str | list[str] | None = field(default=None, repr=False)
+    right_key: str | list[str] | None = field(default=None, repr=False)
     how: Optional[str] = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -474,7 +474,7 @@ class Pivot(Operation):
     ``values_column`` → ``values``.
     """
 
-    index: Union[str, List[str]] = ""
+    index: str | list[str] = ""
     columns: str = ""
     values: str = ""
     aggfunc: str = "first"
