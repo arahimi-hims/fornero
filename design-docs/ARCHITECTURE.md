@@ -149,22 +149,26 @@ Our spreadsheet algebra provides abstractions that match these primitives. A `Sh
 The system uses different coordinate conventions at different boundaries to match idiomatic expectations:
 
 **Internal Representation (0-indexed, Python convention):**
+
 - All internal data structures use 0-indexed coordinates
 - `Range` objects store coordinates as 0-indexed: `Range(row=0, col=0)` refers to cell A1
 - `SetValues` and `SetFormula` operations use 0-indexed: `row=0, col=0` writes to cell A1
 - Operations arithmetic uses 0-indexed: if a range spans rows 0-10, that's `10 - 0 + 1 = 11` rows
 
 **External Representation (1-indexed, spreadsheet convention):**
+
 - Spreadsheet APIs (Google Sheets) use 1-indexed A1 notation
 - `Range.to_a1()` converts to 1-indexed: `Range(row=0, col=0).to_a1()` returns `"A1"`
 - `Range.from_a1()` parses 1-indexed notation: `Range.from_a1("A1")` returns `Range(row=0, col=0)`
 - Executors convert 0-indexed operations to 1-indexed API calls at the boundary
 
 **Conversion Utilities:**
+
 - `zero_to_one_indexed(row, col)` - Convert from internal (0-indexed) to API (1-indexed)
 - `one_to_zero_indexed(row, col)` - Convert from API (1-indexed) to internal (0-indexed)
 
 **Example:**
+
 ```python
 # Internal: Create a range for cells A1:C10 (0-indexed)
 r = Range(row=0, col=0, row_end=9, col_end=2)
@@ -446,6 +450,105 @@ where $C_{1+i}$ is the cell holding column $c$'s value for the current row, $\de
 For window specifications that cannot be expressed with available Google Sheets formulas (e.g., custom frame bounds beyond unbounded-preceding-to-current-row, or partition-aware lag/lead that must not cross partition boundaries), the translator raises $\texttt{UnsupportedOperationError}$.
 
 Row order and the original schema are preserved; column $a$ is appended. **Correctness**: $\text{eval}(\rho') = [\, r \| (a \mapsto f(F_W(r).c)) \mid r \in R \,]$.
+
+#### Optimization Passes
+
+Before translating the plan tree to spreadsheet algebra, the optimizer rewrites
+it to reduce the number of sheets, shrink the data flowing through intermediate
+stages, and eliminate redundant operations. These rewrite rules preserve the
+semantics of the original plan. Like the rest of the translator, the optimizer
+inspects only plan structure; it never touches data values.
+
+We write rewrite rules as $L \Longrightarrow R\;[\text{condition}]$: when a
+subtree matches the left-hand side and the side-condition holds, it is replaced
+by the right-hand side. All passes are applied in the same order, recursing bottom-up (children are optimized
+before their parent). We write $\text{cols}(p)$
+for the set of column names referenced by predicate $p$, $\mathcal{S}(R)$ for
+the output schema of a plan node $R$, and $\top$ for a tautological predicate
+(one of $\texttt{1}$, $\texttt{TRUE}$, $\texttt{True}$, $\texttt{true}$).
+
+The full optimizer is the composition $\mathcal{O} =
+\mathcal{S}\!\operatorname{im} \circ \mathcal{F}\!\operatorname{use} \circ
+\Pi\!\downarrow \circ \sigma\!\downarrow$, applied once. Each component pass is
+idempotent: $f(f(T)) = f(T)$ for every plan tree $T$.
+
+##### Predicate Pushdown ($\sigma\!\downarrow$)
+
+[`optimizer.py:101–140`](../src/fornero/translator/optimizer.py#L101-L140)
+
+Predicate pushdown moves filters closer to source nodes so that fewer rows propagate through the plan.
+
+**Rule $\sigma\!\downarrow\!$-Select.** Push a filter past a projection when the predicate's columns survive the projection:
+
+$$\text{Filter}(\text{Select}(R, C),\; p) \;\Longrightarrow\; \text{Select}(\text{Filter}(R, p),\; C) \qquad [\text{cols}(p) \subseteq C]$$
+
+The rewrite is sound because $\text{Select}$ does not alter row values — it only drops columns. Since every column that $p$ inspects is retained by $C$, evaluating the filter before or after the projection yields the same surviving rows. Formally: $\sigma_p(\pi_C(R)) = \pi_C(\sigma_p(R))$ when $\text{cols}(p) \subseteq C$.
+
+**Rule $\sigma\!\downarrow\!$-Filter.** Merge consecutive filters into a single conjunctive predicate:
+
+$$\text{Filter}(\text{Filter}(R, p_1),\; p_2) \;\Longrightarrow\; \text{Filter}(R,\; p_1 \land p_2)$$
+
+Correctness follows from $\sigma_{p_2}(\sigma_{p_1}(R)) = \sigma_{p_1 \land p_2}(R)$: a row survives both filters if and only if both predicates hold.
+
+##### Projection Pushdown ($\Pi\!\downarrow$)
+
+[`optimizer.py:142–171`](../src/fornero/translator/optimizer.py#L142-L171)
+
+Projection pushdown eliminates columns as early as possible to reduce the width of intermediate relations.
+
+**Rule $\Pi\!\downarrow\!$-Select.** Collapse nested projections:
+
+$$\text{Select}(\text{Select}(R, C_1),\; C_2) \;\Longrightarrow\; \text{Select}(R, C_2) \qquad [C_2 \subseteq C_1]$$
+
+The inner projection produces schema $C_1$; the outer keeps only $C_2 \subseteq C_1$. Applying $C_2$ directly to $R$ produces the same result because projection is monotone in the column set: $\pi_{C_2}(\pi_{C_1}(R)) = \pi_{C_2}(R)$ whenever $C_2 \subseteq C_1$.
+
+##### Operation Fusion ($\mathcal{F}\!\operatorname{use}$)
+
+[`optimizer.py:44–99`](../src/fornero/translator/optimizer.py#L44-L99)
+
+Fusion merges adjacent operations into a single node that can be translated to one sheet instead of two, reducing the total sheet count in the output workbook.
+
+**Rule $\mathcal{F}$-LimitSort.** Fold a limit into its child sort:
+
+$$\text{Limit}(\text{Sort}(R, O),\; n) \;\Longrightarrow\; \text{Sort}(R, O,\; \text{limit}=n')$$
+
+where $n' = \min(n, l)$ if the sort already carries a limit $l$, and $n' = n$ otherwise. Correctness: taking the first $n$ rows of a sorted relation is equivalent to sorting with a limit of $n$ — in both cases the output is the $n$ smallest rows under $\prec_O$.
+
+**Rule $\mathcal{F}$-SortFilter.** Absorb a filter into a sort:
+
+$$\text{Sort}(\text{Filter}(R, p),\; O) \;\Longrightarrow\; \text{Sort}(R, O,\; \text{predicate}=p')$$
+
+where $p' = p$ if the sort carries no existing predicate, and $p' = p_{\text{existing}} \land p$ otherwise. This lets the translator emit a single $\texttt{SORT}$ / $\texttt{QUERY}$ formula that filters and sorts in one pass. Correctness: $\text{sort}_O(\sigma_p(R)) = \text{sort}_O^{p}(R)$ — sorting a filtered set is the same as a predicated sort over the original.
+
+**Rule $\mathcal{F}$-SelectFilter.** Absorb a filter into a projection:
+
+$$\text{Select}(\text{Filter}(R, p),\; C) \;\Longrightarrow\; \text{Select}(R, C,\; \text{predicate}=p')$$
+
+where $p'$ is formed by conjunction as in $\mathcal{F}$-SortFilter. The fused node translates to a single sheet that projects and filters simultaneously. Correctness: $\pi_C(\sigma_p(R)) = \pi_C^{p}(R)$.
+
+##### Simplification ($\mathcal{S}\!\operatorname{im}$)
+
+[`optimizer.py:173–217`](../src/fornero/translator/optimizer.py#L173-L217)
+
+Simplification removes operations that have no effect on the output.
+
+**Rule $\mathcal{S}$-IdentitySelect.** Eliminate a projection that keeps all columns in their original order:
+
+$$\text{Select}(R, C) \;\Longrightarrow\; R \qquad [C = \mathcal{S}(R)]$$
+
+When the projection list equals the child's output schema, the select is the identity function on relations: $\pi_{\mathcal{S}(R)}(R) = R$.
+
+**Rule $\mathcal{S}$-TautologicalFilter.** Eliminate a filter whose predicate is always true:
+
+$$\text{Filter}(R, p) \;\Longrightarrow\; R \qquad [p = \top]$$
+
+A tautological predicate admits every row: $\sigma_\top(R) = R$.
+
+**Rule $\mathcal{S}$-SortAbsorption.** When two sorts are stacked, only the outer one matters:
+
+$$\text{Sort}(\text{Sort}(R, O_1),\; O_2) \;\Longrightarrow\; \text{Sort}(R, O_2)$$
+
+The inner sort's ordering is entirely overwritten by the outer sort. Formally: $\text{sort}_{O_2}(\text{sort}_{O_1}(R)) = \text{sort}_{O_2}(R)$ — the final permutation depends only on $O_2$ (with the stable-sort tie-breaking falling back to the original order of $R$, not the intermediate order produced by $O_1$, since $O_2$ fully re-permutes).
 
 Translation is a pure function of the operation node — **source data becomes static values; every derived computation becomes a formula.** Source nodes (e.g., `read_csv`) are leaf nodes with no operation to translate, so their data is written as cell values. Every other node in the plan tree is a transformation and maps to a formula that references upstream ranges. There is no heuristic, no fallback — if an operation cannot be expressed as a formula, the translator raises `UnsupportedOperationError`.
 
