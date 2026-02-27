@@ -31,6 +31,7 @@ from .operations import (
     JoinType,
     SortDirection,
     LimitEnd,
+    SchemaValidationError,
 )
 from .expressions import (
     Expression,
@@ -63,6 +64,7 @@ __all__ = [
     "JoinType",
     "SortDirection",
     "LimitEnd",
+    "SchemaValidationError",
     "Expression",
     "Column",
     "Literal",
