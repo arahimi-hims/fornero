@@ -135,15 +135,7 @@ def execute(op: Operation) -> pd.DataFrame:
 
         case Filter(predicate=predicate, inputs=[child]):
             df = execute(child)
-            if isinstance(predicate, Expression) and not isinstance(predicate, str):
-                mask = evaluate_expression(predicate, df)
-            elif isinstance(predicate, str):
-                raise ValueError(
-                    f"Cannot eagerly evaluate string predicate: {predicate!r}. "
-                    "Use an Expression AST for eager execution."
-                )
-            else:
-                mask = evaluate_expression(predicate, df)
+            mask = evaluate_expression(predicate, df)
             return df.loc[mask].reset_index(drop=True)
 
         case Sort(keys=keys, inputs=[child]):

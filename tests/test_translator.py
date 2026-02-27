@@ -16,6 +16,7 @@ from fornero.algebra import (
     LogicalPlan, Source, Select, Filter, Join, GroupBy, Aggregate,
     Sort, Limit, WithColumn, Union, Pivot, Melt, Window
 )
+from fornero.algebra.expressions import col, Literal
 from fornero.translator import (
     Translator, Optimizer, LambdaAnalyzer,
     AppsScriptGenerator, generate_apps_script_function
@@ -77,7 +78,7 @@ class TestTranslateFilter:
     def test_filter_produces_filter_formula(self):
         """Filter produces CreateSheet, SetValues (header), and FILTER formula."""
         source = Source(source_id="test.csv", schema=["age", "city"])
-        filter_op = Filter(predicate="age > 25", inputs=[source])
+        filter_op = Filter(predicate=col("age") > 25, inputs=[source])
         plan = LogicalPlan(filter_op)
 
         translator = Translator()
@@ -92,12 +93,12 @@ class TestTranslateFilter:
     def test_filter_translates_predicates(self):
         """Filter correctly translates comparison operators."""
         test_cases = [
-            ("age > 25", ">"),
-            ("age < 30", "<"),
-            ("age = 25", "="),
-            ("age >= 25", ">="),
-            ("age <= 30", "<="),
-            ("age != 25", "!="),
+            (col("age") > 25, ">"),
+            (col("age") < 30, "<"),
+            (col("age") == 25, "="),
+            (col("age") >= 25, ">="),
+            (col("age") <= 30, "<="),
+            (col("age") != 25, "!="),
         ]
 
         for predicate, operator in test_cases:
@@ -117,7 +118,7 @@ class TestTranslateFilter:
     def test_filter_translates_and_or(self):
         """Filter translates AND/OR to spreadsheet equivalents."""
         source = Source(source_id="test.csv", schema=["age", "city"])
-        filter_op = Filter(predicate="age > 25 AND city = 'NYC'", inputs=[source])
+        filter_op = Filter(predicate=(col("age") > 25) & (col("city") == "NYC"), inputs=[source])
         plan = LogicalPlan(filter_op)
 
         translator = Translator()
@@ -571,7 +572,7 @@ class TestMultiSheetPlans:
     def test_chained_operations_produce_multiple_sheets(self):
         """Chain of operations produces one sheet per operation plus sources."""
         source = Source(source_id="test.csv", schema=["a", "b"])
-        filter_op = Filter(predicate="a > 1", inputs=[source])
+        filter_op = Filter(predicate=col("a") > 1, inputs=[source])
         groupby_op = GroupBy(keys=["b"], aggregations=[("total", "sum", "a")], inputs=[filter_op])
         sort_op = Sort(keys=[("total", "desc")], inputs=[groupby_op])
         plan = LogicalPlan(sort_op)
@@ -586,7 +587,7 @@ class TestMultiSheetPlans:
     def test_cross_sheet_references_use_correct_names(self):
         """Cross-sheet formula references use correct sheet names."""
         source = Source(source_id="test.csv", schema=["value"])
-        filter_op = Filter(predicate="value > 5", inputs=[source])
+        filter_op = Filter(predicate=col("value") > 5, inputs=[source])
         plan = LogicalPlan(filter_op)
 
         translator = Translator()
@@ -658,7 +659,7 @@ class TestOptimizationPasses:
     def test_formula_simplification_tautological_filter(self):
         """Tautological filter is elided."""
         source = Source(source_id="test.csv", schema=["a"])
-        filter_op = Filter(predicate="1", inputs=[source])
+        filter_op = Filter(predicate=Literal(value=True), inputs=[source])
         plan = LogicalPlan(filter_op)
 
         optimizer = Optimizer()
@@ -721,7 +722,7 @@ class TestOptimizationPasses:
     def test_optimizations_preserve_semantics(self):
         """Optimized plan produces same output for fixed input."""
         source = Source(source_id="test.csv", schema=["value"])
-        filter_op = Filter(predicate="value > 5", inputs=[source])
+        filter_op = Filter(predicate=col("value") > 5, inputs=[source])
         plan = LogicalPlan(filter_op)
 
         translator = Translator()

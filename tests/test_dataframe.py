@@ -15,6 +15,7 @@ import pandas as pd
 import fornero
 from fornero import DataFrame, LogicalPlan
 from fornero.algebra import Source, Select, Filter, Sort, Limit, GroupBy, Join, WithColumn, Union
+from fornero.algebra.expressions import BinaryOp, Column, Literal
 
 
 class TestDataFrameConstruction:
@@ -467,3 +468,69 @@ class TestPlanExplain:
         explanation = df._plan.explain()
 
         assert 'Source' in explanation or 'source' in explanation
+
+
+class TestTrackedSeriesASTPredicates:
+    """Tests for _TrackedSeries creating AST predicates instead of strings."""
+
+    def test_tracked_series_creates_ast_predicates(self):
+        """_TrackedSeries comparison operators create AST predicates."""
+        df = DataFrame({'age': [25, 35, 45]})
+        condition = df['age'] > 30
+
+        # Verify _predicate is an AST node
+        assert isinstance(condition._predicate, BinaryOp)
+        assert condition._predicate.op == '>'
+        assert isinstance(condition._predicate.left, Column)
+        assert condition._predicate.left.name == 'age'
+        assert isinstance(condition._predicate.right, Literal)
+        assert condition._predicate.right.value == 30
+
+    def test_tracked_series_compound_predicates(self):
+        """_TrackedSeries logical operators combine AST nodes."""
+        df = DataFrame({'age': [25, 35, 45], 'salary': [40000, 60000, 80000]})
+        condition = (df['age'] > 30) & (df['salary'] > 50000)
+
+        # Verify compound AST
+        assert isinstance(condition._predicate, BinaryOp)
+        assert condition._predicate.op == 'and'
+        
+        # Verify left side
+        assert isinstance(condition._predicate.left, BinaryOp)
+        assert condition._predicate.left.op == '>'
+        
+        # Verify right side
+        assert isinstance(condition._predicate.right, BinaryOp)
+        assert condition._predicate.right.op == '>'
+
+    def test_tracked_series_all_comparison_operators(self):
+        """All comparison operators create correct AST predicates."""
+        df = DataFrame({'x': [1, 2, 3]})
+        
+        test_cases = [
+            (df['x'] > 1, '>'),
+            (df['x'] >= 1, '>='),
+            (df['x'] < 3, '<'),
+            (df['x'] <= 3, '<='),
+            (df['x'] == 2, '=='),
+            (df['x'] != 1, '!='),
+        ]
+        
+        for condition, expected_op in test_cases:
+            assert isinstance(condition._predicate, BinaryOp)
+            assert condition._predicate.op == expected_op
+            assert isinstance(condition._predicate.left, Column)
+            assert isinstance(condition._predicate.right, Literal)
+
+    def test_filter_with_ast_predicate_works_eagerly(self):
+        """Filtering with AST predicates works in eager mode."""
+        df = DataFrame({'age': [25, 35, 45], 'name': ['Alice', 'Bob', 'Carol']})
+        result = df[df['age'] > 30]
+        
+        # Verify pandas execution
+        assert len(result) == 2
+        assert result['age'].tolist() == [35, 45]
+        
+        # Verify plan has AST predicate
+        assert isinstance(result._plan.root, Filter)
+        assert isinstance(result._plan.root.predicate, BinaryOp)

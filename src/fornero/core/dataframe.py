@@ -18,6 +18,7 @@ import textwrap
 
 import pandas as pd
 from ..algebra import LogicalPlan, Source, Select, Filter, Sort, Limit, GroupBy, WithColumn, Join, Pivot
+from ..algebra.expressions import BinaryOp, Column, Literal
 
 
 def _extract_lambda_expression(func, kwarg_name=None):
@@ -85,37 +86,34 @@ class _TrackedSeries(pd.Series):
     def _constructor_expanddim(self):
         return lambda *a, **kw: DataFrame(*a, **kw)
 
-    def _fmt_value(self, v):
-        return f'"{v}"' if isinstance(v, str) else str(v)
-
     def __gt__(self, other):
         result = super().__gt__(other)
-        result._predicate = f"{self.name} > {self._fmt_value(other)}"
+        result._predicate = Column(self.name) > other
         return result
 
     def __ge__(self, other):
         result = super().__ge__(other)
-        result._predicate = f"{self.name} >= {self._fmt_value(other)}"
+        result._predicate = Column(self.name) >= other
         return result
 
     def __lt__(self, other):
         result = super().__lt__(other)
-        result._predicate = f"{self.name} < {self._fmt_value(other)}"
+        result._predicate = Column(self.name) < other
         return result
 
     def __le__(self, other):
         result = super().__le__(other)
-        result._predicate = f"{self.name} <= {self._fmt_value(other)}"
+        result._predicate = Column(self.name) <= other
         return result
 
     def __eq__(self, other):
         result = super().__eq__(other)
-        result._predicate = f"{self.name} == {self._fmt_value(other)}"
+        result._predicate = Column(self.name) == other
         return result
 
     def __ne__(self, other):
         result = super().__ne__(other)
-        result._predicate = f"{self.name} != {self._fmt_value(other)}"
+        result._predicate = Column(self.name) != other
         return result
 
     def __and__(self, other):
@@ -123,7 +121,7 @@ class _TrackedSeries(pd.Series):
         left = getattr(self, "_predicate", None)
         right = getattr(other, "_predicate", None)
         if left and right:
-            result._predicate = f"{left} AND {right}"
+            result._predicate = BinaryOp(op='and', left=left, right=right)
         return result
 
     def __or__(self, other):
@@ -131,7 +129,7 @@ class _TrackedSeries(pd.Series):
         left = getattr(self, "_predicate", None)
         right = getattr(other, "_predicate", None)
         if left and right:
-            result._predicate = f"{left} OR {right}"
+            result._predicate = BinaryOp(op='or', left=left, right=right)
         return result
 
 

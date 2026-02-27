@@ -423,15 +423,10 @@ def _translate_expression_ast(node: Expression, input_sheet: str, input_range: R
 
 def _translate_predicate(predicate, input_sheet: str, input_range: Range,
                          input_schema: List[str]) -> str:
-    """Translate a predicate expression to spreadsheet condition.
-
-    Supports:
-    - Expression AST nodes (BinaryOp, Column, Literal, etc.)
-    - Comparison operators: >, <, =, >=, <=, != (converted to Google Sheets syntax)
-    - Logical operators: AND (as *), OR (as +)
+    """Translate a predicate Expression AST to spreadsheet condition.
 
     Args:
-        predicate: Predicate — either an Expression AST node or a string
+        predicate: Expression AST node (BinaryOp, Column, Literal, etc.)
         input_sheet: Input sheet name
         input_range: Input data range
         input_schema: Input column names
@@ -439,31 +434,12 @@ def _translate_predicate(predicate, input_sheet: str, input_range: Range,
     Returns:
         Spreadsheet condition expression
     """
-    if isinstance(predicate, (BinaryOp, UnaryOp, Column, Literal, FunctionCall)):
-        return _translate_expression_ast(predicate, input_sheet, input_range, input_schema)
-
-    result = predicate if isinstance(predicate, str) else str(predicate)
-
-    result = result.replace("!=", "<>")
-    result = result.replace("==", "=")
-
-    for col_name in sorted(input_schema, key=len, reverse=True):
-        if col_name in result:
-            col_idx = input_schema.index(col_name)
-            col_ref = _col_to_range_ref(input_sheet, input_range, col_name, col_idx, data_only=True)
-            result = result.replace(f" {col_name} ", f" {col_ref} ")
-            result = result.replace(f"({col_name} ", f"({col_ref} ")
-            result = result.replace(f" {col_name})", f" {col_ref})")
-            if result.startswith(col_name + " "):
-                result = col_ref + result[len(col_name):]
-
-    result = result.replace(" AND ", ")*(")
-    result = result.replace(" OR ", ")+(")
-
-    if ")*(" in result or ")+(" in result:
-        result = "(" + result + ")"
-
-    return result
+    if not isinstance(predicate, (BinaryOp, UnaryOp, Column, Literal, FunctionCall)):
+        raise ValueError(
+            f"Predicate must be an Expression AST node, got {type(predicate).__name__}. "
+            f"Use col() helper to create predicates."
+        )
+    return _translate_expression_ast(predicate, input_sheet, input_range, input_schema)
 
 
 def translate_join(op: Join, counter: int, left_sheet: str, left_range: Range, left_schema: List[str],

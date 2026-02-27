@@ -26,25 +26,26 @@ from ..algebra import (
 )
 
 
-def trace_filter(df, condition, predicate_str: str | None = None) -> LogicalPlan:
+def trace_filter(df, condition, predicate=None) -> LogicalPlan:
     """Trace a filter operation.
 
     Args:
-        df: Source DataFrame
-        condition: Boolean condition (can be a Series or array)
-        predicate_str: Optional string representation of the predicate
+        df: Input dataframe with _plan attribute
+        condition: Boolean mask (used for pandas execution)
+        predicate: Expression AST predicate (extracted from condition._predicate if not provided)
 
     Returns:
-        New LogicalPlan with Filter node
+        New LogicalPlan with Filter operation
     """
-    if predicate_str is None:
-        # Try to extract predicate string from condition
-        if hasattr(condition, 'name'):
-            predicate_str = f"{condition.name} filter"
-        else:
-            predicate_str = "boolean filter"
+    if predicate is None:
+        predicate = getattr(condition, '_predicate', None)
+        if predicate is None:
+            raise ValueError(
+                "Cannot trace filter: condition has no _predicate. "
+                "Use df[df['col'] > value] syntax to create trackable predicates."
+            )
 
-    filter_op = Filter(predicate=predicate_str, inputs=[df._plan.root])
+    filter_op = Filter(predicate=predicate, inputs=[df._plan.root])
     return LogicalPlan(filter_op)
 
 
@@ -212,28 +213,3 @@ def trace_union(df1, df2) -> LogicalPlan:
 
     union_op = Union(inputs=[df1._plan.root, df2_root])
     return LogicalPlan(union_op)
-
-
-def build_predicate_string(condition) -> str:
-    """Build a string representation of a filter predicate.
-
-    This is a best-effort function that tries to extract a meaningful
-    predicate string from a boolean condition.
-
-    Args:
-        condition: Boolean condition (Series, array, or expression)
-
-    Returns:
-        String representation of the predicate
-    """
-    # Try to get a meaningful representation
-    if hasattr(condition, 'name') and condition.name:
-        return f"{condition.name} filter"
-    elif hasattr(condition, '__str__'):
-        s = str(condition)
-        # Limit length to avoid very long strings
-        if len(s) > 100:
-            return "complex filter"
-        return s
-    else:
-        return "boolean filter"

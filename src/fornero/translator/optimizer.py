@@ -22,6 +22,15 @@ class Optimizer:
         """Initialize optimizer."""
         pass
 
+    def _combine_predicates_and(self, pred1, pred2):
+        """Combine two AST predicates with AND operator."""
+        if pred1 is None:
+            return pred2
+        if pred2 is None:
+            return pred1
+        from fornero.algebra.expressions import BinaryOp
+        return BinaryOp(op='and', left=pred1, right=pred2)
+
     def optimize(self, plan: LogicalPlan) -> LogicalPlan:
         """Apply all optimization passes to a plan.
 
@@ -69,32 +78,24 @@ class Optimizer:
         if isinstance(op, Sort):
             if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
                 child_filter = optimized_inputs[0]
-                # Only fuse if predicates are strings (AST predicates not yet supported in fusion)
-                if isinstance(child_filter.predicate, str) and (op.predicate is None or isinstance(op.predicate, str)):
-                    # Fuse filter into sort
-                    # If Sort already has a predicate (unlikely unless we have multiple layers), AND them.
-                    new_pred = child_filter.predicate
-                    if op.predicate:
-                        new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+                # Fuse filter into sort
+                # If Sort already has a predicate (unlikely unless we have multiple layers), AND them.
+                new_pred = self._combine_predicates_and(op.predicate, child_filter.predicate)
 
-                    new_sort = Sort(keys=op.keys, inputs=child_filter.inputs,
-                                   limit=op.limit, predicate=new_pred)
-                    return new_sort
+                new_sort = Sort(keys=op.keys, inputs=child_filter.inputs,
+                               limit=op.limit, predicate=new_pred)
+                return new_sort
 
         # 3. Select(Filter) fusion
         if isinstance(op, Select):
             if len(optimized_inputs) == 1 and isinstance(optimized_inputs[0], Filter):
                 child_filter = optimized_inputs[0]
-                # Only fuse if predicates are strings (AST predicates not yet supported in fusion)
-                if isinstance(child_filter.predicate, str) and (op.predicate is None or isinstance(op.predicate, str)):
-                    # Fuse filter into select
-                    new_pred = child_filter.predicate
-                    if op.predicate:
-                        new_pred = f"({op.predicate}) AND ({child_filter.predicate})"
+                # Fuse filter into select
+                new_pred = self._combine_predicates_and(op.predicate, child_filter.predicate)
 
-                    # Clone select with fused predicate and inputs of filter
-                    new_select = Select(columns=op.columns, inputs=child_filter.inputs, predicate=new_pred)
-                    return new_select
+                # Clone select with fused predicate and inputs of filter
+                new_select = Select(columns=op.columns, inputs=child_filter.inputs, predicate=new_pred)
+                return new_select
 
         # Update with optimized inputs
         if optimized_inputs != op.inputs:
@@ -117,8 +118,7 @@ class Optimizer:
         optimized_inputs = [self._predicate_pushdown(inp) for inp in op.inputs]
 
         # If this is a Filter, try to push it down
-        # Only optimize string predicates; expression AST predicates are handled elsewhere
-        if isinstance(op, Filter) and isinstance(op.predicate, str):
+        if isinstance(op, Filter):
             if len(optimized_inputs) == 1:
                 child = optimized_inputs[0]
 
@@ -133,9 +133,9 @@ class Optimizer:
                             return new_select
 
                 # Can push filter down past another filter (combine them)
-                if isinstance(child, Filter) and isinstance(child.predicate, str):
+                if isinstance(child, Filter):
                     # Combine predicates with AND
-                    combined_predicate = f"({child.predicate}) AND ({op.predicate})"
+                    combined_predicate = self._combine_predicates_and(child.predicate, op.predicate)
                     return Filter(predicate=combined_predicate, inputs=child.inputs)
 
         # For other operations, just update with optimized inputs
@@ -204,8 +204,9 @@ class Optimizer:
 
         # Detect tautological Filter
         if isinstance(op, Filter):
-            # Only optimize string predicates; expression AST predicates are handled elsewhere
-            if isinstance(op.predicate, str) and op.predicate.strip() in ("1", "TRUE", "True", "true"):
+            # Check if predicate is a literal True value
+            from fornero.algebra.expressions import Literal
+            if isinstance(op.predicate, Literal) and op.predicate.value is True:
                 # Always-true filter - eliminate
                 if len(optimized_inputs) == 1:
                     return optimized_inputs[0]
@@ -222,38 +223,35 @@ class Optimizer:
 
         return op
 
-    def _extract_column_references(self, predicate: str) -> Set[str]:
-        """Extract column names referenced in a predicate.
-
-        This is a simplified implementation using tokenization.
+    def _extract_column_references(self, predicate) -> Set[str]:
+        """Extract column names from predicate (works with AST).
 
         Args:
-            predicate: Predicate string
+            predicate: Predicate (Expression AST node or string)
 
         Returns:
             Set of column names
         """
-        # Simple heuristic: split by common operators and keywords
-        import re
+        if not predicate:
+            return set()
 
-        # Split on operators and punctuation
-        tokens = re.split(r'[<>=!()&|+\-*/\s]+', predicate)
+        from fornero.algebra.expressions import Column, BinaryOp, UnaryOp, FunctionCall
 
-        # Filter out numbers and common keywords
-        keywords = {'AND', 'OR', 'NOT', 'TRUE', 'FALSE', 'NULL'}
-        columns = set()
+        refs = set()
+        def walk(node):
+            if isinstance(node, Column):
+                refs.add(node.name)
+            elif isinstance(node, BinaryOp):
+                walk(node.left)
+                walk(node.right)
+            elif isinstance(node, UnaryOp):
+                walk(node.operand)
+            elif isinstance(node, FunctionCall):
+                for arg in node.args:
+                    walk(arg)
 
-        for token in tokens:
-            token = token.strip().strip("'\"")
-            if token and not token.isnumeric() and token.upper() not in keywords:
-                # Try to parse as number
-                try:
-                    float(token)
-                except ValueError:
-                    # Not a number, likely a column name
-                    columns.add(token)
-
-        return columns
+        walk(predicate)
+        return refs
 
     def _get_output_schema(self, op: Operation) -> List[str]:
         """Heuristically determine the output schema of an operation.

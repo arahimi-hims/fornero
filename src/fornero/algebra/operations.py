@@ -34,10 +34,13 @@ Binary operations (Join, Union) accept ``left=`` / ``right=`` as shorthand for
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Tuple, Union
+from typing import List, Dict, Optional, Any, Tuple, Union, TYPE_CHECKING
 from enum import Enum
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from .expressions import Expression
 
 
 class SchemaValidationError(ValueError):
@@ -300,7 +303,7 @@ class Filter(Operation):
     Aliases: ``input`` → ``inputs[0]``.
     """
 
-    predicate: Any = ""
+    predicate: "Expression | Any" = ""
     input: Optional[Operation] = field(default=None, repr=False)
 
     def __post_init__(self):
