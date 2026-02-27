@@ -18,7 +18,7 @@ import textwrap
 
 import pandas as pd
 from ..algebra import LogicalPlan, Source, Select, Filter, Sort, Limit, GroupBy, WithColumn, Join, Pivot
-from ..algebra.expressions import BinaryOp, Column, Literal
+from ..algebra.expressions import Column
 
 
 def _extract_lambda_expression(func, kwarg_name=None):
@@ -121,7 +121,7 @@ class _TrackedSeries(pd.Series):
         left = getattr(self, "_predicate", None)
         right = getattr(other, "_predicate", None)
         if left and right:
-            result._predicate = BinaryOp(op='and', left=left, right=right)
+            result._predicate = left & right
         return result
 
     def __or__(self, other):
@@ -129,7 +129,7 @@ class _TrackedSeries(pd.Series):
         left = getattr(self, "_predicate", None)
         right = getattr(other, "_predicate", None)
         if left and right:
-            result._predicate = BinaryOp(op='or', left=left, right=right)
+            result._predicate = left | right
         return result
 
 

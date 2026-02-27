@@ -387,10 +387,66 @@ This document defines independent cleanup tasks that can be executed in parallel
 
 ---
 
+## Agent 12: Leverage Existing APIs Over Manual Construction
+
+**Scope:** All `src/fornero/` modules
+
+**Task:** Identify places where we manually construct objects or perform operations that existing APIs already handle more elegantly.
+
+**Pattern Name:** "Prefer Higher-Level Abstractions" / "Use the Object's Own Protocol"
+
+**Core Principle:** When you find yourself assembling parts manually, check if the objects already provide methods, operators, or builders that encapsulate that assembly. Code written before infrastructure exists often doesn't leverage that infrastructure once it's built.
+
+**Key Questions to Ask:**
+
+1. **Is there a simpler way to express this?** - Does the domain object provide operators, methods, or builders that achieve the same result?
+2. **Am I repeating construction logic?** - If the same assembly pattern appears elsewhere, there's likely a reusable API
+3. **Am I asking for parts to build something?** - Consider whether you should tell the object what to do instead
+4. **Does this feel verbose?** - If construction takes many lines, there may be a higher-level API
+
+**Example from Recent Refactor:**
+
+```python
+# Before (8 lines): asking for name, manually assembling parts
+result._predicate = BinaryOp(
+    op='>',
+    left=Column(name=self.name),
+    right=Literal(value=other)
+)
+
+# After (1 line): telling Column to compare itself
+result._predicate = Column(self.name) > other
+```
+
+Savings: 50% reduction in lines, clearer intent, reuses existing logic.
+
+**Approach:**
+
+1. **Find verbose construction patterns**: Look for multi-line object construction, repeated patterns, or complex initialization
+2. **Check if simpler APIs exist**: Review the class definition - does it have operators, builders, factory methods, or convenience constructors?
+3. **Analyze impact**: For each candidate, check all usages to ensure the simpler API is applicable everywhere
+4. **Verify behavior equivalence**: The refactored code must produce identical results
+5. **Document boundaries**: Identify cases where manual construction is appropriate (tests, parsing, serialization boundaries)
+
+**Deliverables:**
+
+- Markdown table: `| Location | Current Pattern | Simpler API | LOC Saved | Readability Impact |`
+- For each finding: before/after code, explanation of why the simpler API works, any edge cases
+- List of legitimate manual construction sites with justification
+
+**Acceptance Criteria:**
+
+- Survey of major construction patterns across the codebase
+- At least 3 refactoring opportunities identified OR conclusive evidence that code is already well-factored
+- Each finding validated for correctness and includes usage analysis
+- Clear documentation of when manual construction is preferred
+
+---
+
 ## Execution Notes
 
-- **Parallelization:** Agents 1-3 (semantics), 4-6 (imports), 7-9 (packing), and 10-11 (defensive code) can run fully in parallel
+- **Parallelization:** Agents 1-3 (semantics), 4-6 (imports), 7-9 (packing), 10-11 (defensive code), and 12 (DSL opportunities) can run fully in parallel
 - **Dependencies:** None - all tasks are independent
-- **Conflict Resolution:** Each agent works on distinct file sets or performs read-only analysis
+- **Conflict Resolution:** Each agent works on distinct file sets or performs read-only analysis (Agent 12 is analysis-only)
 - **Testing:** Agents that modify code (4-6, 10-11) must run `pytest tests/` to verify changes
 - **Reporting:** All agents should output findings to `design-docs/cleanup-results/agent-N-<name>.md`

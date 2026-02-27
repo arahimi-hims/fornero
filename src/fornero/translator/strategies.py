@@ -123,6 +123,11 @@ def _generate_sheet_name(op: Operation, counter: int) -> str:
     return f"{op_type}_{counter}"
 
 
+def _col_ref(sheet: str, range_obj: Range, col_name: str, schema: List[str], data_only: bool = True) -> str:
+    """Shorthand: look up a column's index in *schema* and return its range reference."""
+    return _col_to_range_ref(sheet, range_obj, col_name, schema.index(col_name), data_only=data_only)
+
+
 def _col_to_range_ref(sheet: str, range_obj: Range, col_name: str, col_idx: int, data_only: bool = True) -> str:
     """Generate a range reference for a single column.
 
@@ -274,13 +279,12 @@ def translate_select(op: Select, counter: int, input_sheet: str, input_range: Ra
     for col_name in op.columns:
         if col_name not in input_schema:
             raise ValueError(f"Column '{col_name}' not found in input schema: {input_schema}")
-        col_idx = input_schema.index(col_name)
-        col_refs.append(_col_to_range_ref(input_sheet, input_range, col_name, col_idx, data_only=True))
+        col_refs.append(_col_ref(input_sheet, input_range, col_name, input_schema))
 
     # Use a single FILTER formula that selects the columns and excludes
     # empty trailing rows (which arise when an upstream FILTER returned
     # fewer rows than the statically-allocated range).
-    first_col_ref = _col_to_range_ref(input_sheet, input_range, input_schema[0], 0, data_only=True)
+    first_col_ref = _col_ref(input_sheet, input_range, input_schema[0], input_schema)
 
     conditions = []
     conditions.append(f'{first_col_ref}<>""')
@@ -491,17 +495,14 @@ def _translate_left_or_inner_join(ctx: JoinTranslationContext) -> TranslationRes
         col_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, j, data_only=True)
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': j, 'formula': f"=ARRAYFORMULA({col_ref})"})
 
-    left_key_idx = ctx.left_schema.index(ctx.left_key)
-    right_key_idx = ctx.right_schema.index(ctx.right_key)
-    lookup_array_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
-    lookup_range_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
+    lookup_array_ref = _col_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, ctx.left_schema)
+    lookup_range_ref = _col_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, ctx.right_schema)
 
     current_col = len(ctx.left_schema)
     for col_name in ctx.right_schema:
         if col_name in ctx.right_keys:
             continue
-        col_idx = ctx.right_schema.index(col_name)
-        return_array_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
+        return_array_ref = _col_ref(ctx.right_sheet, ctx.right_range, col_name, ctx.right_schema)
         xlookup_formula = f'=ARRAYFORMULA(XLOOKUP({lookup_array_ref}, {lookup_range_ref}, {return_array_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': current_col, 'formula': xlookup_formula})
         current_col += 1
@@ -540,14 +541,11 @@ def _translate_right_join(ctx: JoinTranslationContext) -> TranslationResult:
     operations.append({'type': 'create_sheet', 'name': sheet_name, 'rows': num_rows, 'cols': ctx.num_cols})
     operations.append({'type': 'set_values', 'sheet': sheet_name, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    left_key_idx = ctx.left_schema.index(ctx.left_key)
-    right_key_idx = ctx.right_schema.index(ctx.right_key)
-    lookup_array_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
-    search_range_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
+    lookup_array_ref = _col_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, ctx.right_schema)
+    search_range_ref = _col_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, ctx.left_schema)
 
     for j, col_name in enumerate(ctx.left_schema):
-        col_idx = ctx.left_schema.index(col_name)
-        return_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, col_idx, data_only=True)
+        return_ref = _col_ref(ctx.left_sheet, ctx.left_range, col_name, ctx.left_schema)
         xlookup = f'=ARRAYFORMULA(XLOOKUP({lookup_array_ref}, {search_range_ref}, {return_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': j, 'formula': xlookup})
 
@@ -555,9 +553,8 @@ def _translate_right_join(ctx: JoinTranslationContext) -> TranslationResult:
     for col_name in ctx.right_schema:
         if col_name in ctx.right_keys:
             continue
-        col_idx = ctx.right_schema.index(col_name)
-        col_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
-        operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': current_col, 'formula': f"=ARRAYFORMULA({col_ref})"})
+        ref = _col_ref(ctx.right_sheet, ctx.right_range, col_name, ctx.right_schema)
+        operations.append({'type': 'set_formula', 'sheet': sheet_name, 'row': 1, 'col': current_col, 'formula': f"=ARRAYFORMULA({ref})"})
         current_col += 1
 
     output_range = Range(row=0, col=0, row_end=num_rows, col_end=ctx.num_cols - 1)
@@ -575,8 +572,6 @@ def _translate_outer_join(ctx: JoinTranslationContext) -> TranslationResult:
     left_part = f"{sheet_name}_left"
     anti_part = f"{sheet_name}_anti"
 
-    left_key_idx = ctx.left_schema.index(ctx.left_key)
-    right_key_idx = ctx.right_schema.index(ctx.right_key)
     left_num_rows = ctx.left_range.row_end - ctx.left_range.row + 1
     right_num_rows = ctx.right_range.row_end - ctx.right_range.row + 1
 
@@ -587,18 +582,17 @@ def _translate_outer_join(ctx: JoinTranslationContext) -> TranslationResult:
     operations.append({'type': 'set_values', 'sheet': left_part, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
     for j, col_name in enumerate(ctx.left_schema):
-        col_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, j, data_only=True)
-        operations.append({'type': 'set_formula', 'sheet': left_part, 'row': 1, 'col': j, 'formula': f"=ARRAYFORMULA({col_ref})"})
+        ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, col_name, j, data_only=True)
+        operations.append({'type': 'set_formula', 'sheet': left_part, 'row': 1, 'col': j, 'formula': f"=ARRAYFORMULA({ref})"})
 
-    lookup_array = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
-    search_range = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
+    lookup_array = _col_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, ctx.left_schema)
+    search_range = _col_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, ctx.right_schema)
 
     current_col = len(ctx.left_schema)
     for col_name in ctx.right_schema:
         if col_name in ctx.right_keys:
             continue
-        col_idx = ctx.right_schema.index(col_name)
-        ret_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, col_idx, data_only=True)
+        ret_ref = _col_ref(ctx.right_sheet, ctx.right_range, col_name, ctx.right_schema)
         xlookup = f'=ARRAYFORMULA(XLOOKUP({lookup_array}, {search_range}, {ret_ref}, ""))'
         operations.append({'type': 'set_formula', 'sheet': left_part, 'row': 1, 'col': current_col, 'formula': xlookup})
         current_col += 1
@@ -609,21 +603,15 @@ def _translate_outer_join(ctx: JoinTranslationContext) -> TranslationResult:
     operations.append({'type': 'create_sheet', 'name': anti_part, 'rows': right_num_rows, 'cols': ctx.num_cols})
     operations.append({'type': 'set_values', 'sheet': anti_part, 'row': 0, 'col': 0, 'values': [ctx.output_schema]})
 
-    r2_key_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, right_key_idx, data_only=True)
-    r1_key_ref = _col_to_range_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, left_key_idx, data_only=True)
+    r2_key_ref = _col_ref(ctx.right_sheet, ctx.right_range, ctx.right_key, ctx.right_schema)
+    r1_key_ref = _col_ref(ctx.left_sheet, ctx.left_range, ctx.left_key, ctx.left_schema)
     anti_condition = f"ISNA(XMATCH({r2_key_ref}, {r1_key_ref}))"
 
     for j, col_name in enumerate(ctx.output_schema):
         if col_name in ctx.left_schema:
-            # R1 columns are null for unmatched R2 rows — fill with empty strings
-            # Use IF(condition, "", "") wrapped in ARRAYFORMULA so it spills to the
-            # correct number of rows matching the FILTER output.
-            # Simpler: leave R1 columns blank by not writing a formula.
             pass
         else:
-            # R2 non-key column — FILTER to keep only unmatched rows
-            r2_col_idx = ctx.right_schema.index(col_name)
-            r2_col_ref = _col_to_range_ref(ctx.right_sheet, ctx.right_range, col_name, r2_col_idx, data_only=True)
+            r2_col_ref = _col_ref(ctx.right_sheet, ctx.right_range, col_name, ctx.right_schema)
             formula = f"=FILTER({r2_col_ref}, {anti_condition})"
             operations.append({'type': 'set_formula', 'sheet': anti_part, 'row': 1, 'col': j, 'formula': formula})
 
@@ -695,8 +683,7 @@ def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: 
 
     if num_keys == 1:
         key = op.keys[0]
-        key_idx = input_schema.index(key)
-        key_ref = _col_to_range_ref(input_sheet, input_range, key, key_idx, data_only=True)
+        key_ref = _col_ref(input_sheet, input_range, key, input_schema)
         unique_formula = f"=UNIQUE({key_ref})"
     else:
         # Multi-column UNIQUE: reference all key columns together
@@ -722,11 +709,7 @@ def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: 
             unique_formula = f"=UNIQUE({keys_ref.to_string()})"
         else:
             # Keys are non-contiguous - use array construction {col_a, col_d}
-            key_refs = []
-            for key in op.keys:
-                key_idx = input_schema.index(key)
-                key_ref = _col_to_range_ref(input_sheet, input_range, key, key_idx, data_only=True)
-                key_refs.append(key_ref)
+            key_refs = [_col_ref(input_sheet, input_range, key, input_schema) for key in op.keys]
 
             # Build array construction formula
             array_construction = "{" + ", ".join(key_refs) + "}"
@@ -744,11 +727,10 @@ def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: 
             raise UnsupportedOperationError(f"Aggregation function '{agg_func}' not supported")
 
         spreadsheet_func = agg_func_map[agg_func]
-        agg_col_idx = input_schema.index(agg_col)
 
         # Get source value column reference (for sum/mean/min/max, not count)
         if agg_func != 'count':
-            value_ref = _col_to_range_ref(input_sheet, input_range, agg_col, agg_col_idx, data_only=True)
+            value_ref = _col_ref(input_sheet, input_range, agg_col, input_schema)
 
         # Generate formula for each potential output row
         for row_offset in range(max_output_rows - 1):  # -1 because row 0 is header
@@ -761,13 +743,9 @@ def translate_groupby(op: GroupBy, counter: int, input_sheet: str, input_range: 
             # Build criteria pairs for each key column
             criteria_parts = []
             for key_idx, key in enumerate(op.keys):
-                src_key_col_idx = input_schema.index(key)
-                src_key_ref = _col_to_range_ref(input_sheet, input_range, key, src_key_col_idx, data_only=True)
-
-                # Reference to this row's key value
+                src_key_ref = _col_ref(input_sheet, input_range, key, input_schema)
                 output_key_col_letter = Range._col_to_letter(key_idx)
                 output_key_cell = f"{sheet_name}!{output_key_col_letter}{output_row}"
-
                 criteria_parts.append(f"{src_key_ref}, {output_key_cell}")
 
             criteria_clause = ", ".join(criteria_parts)
@@ -848,11 +826,8 @@ def translate_aggregate(op: Aggregate, counter: int, input_sheet: str, input_ran
         if agg_func not in func_map:
             raise UnsupportedOperationError(f"Aggregation function '{agg_func}' not supported")
 
-        col_idx = input_schema.index(agg_col)
-        col_ref = _col_to_range_ref(input_sheet, input_range, agg_col, col_idx, data_only=True)
-
         sheets_func = func_map[agg_func]
-        formula = f"={sheets_func}({col_ref})"
+        formula = f"={sheets_func}({_col_ref(input_sheet, input_range, agg_col, input_schema)})"
 
         operations.append({
             'type': 'set_formula',
@@ -924,11 +899,9 @@ def translate_sort(op: Sort, counter: int, input_sheet: str, input_range: Range,
     conditions = []
 
     # Always filter out empty rows from fixed-range upstream sheets
-    first_col_ref = _col_to_range_ref(input_sheet, input_range, input_schema[0], 0, data_only=True)
-    conditions.append(f'{first_col_ref}<>""')
+    conditions.append(f'{_col_ref(input_sheet, input_range, input_schema[0], input_schema)}<>""')
 
     if op.predicate:
-        # Translate the pushed-down predicate
         pred_expr = _translate_predicate(op.predicate, input_sheet, input_range, input_schema)
         conditions.append(pred_expr)
 
@@ -1075,15 +1048,12 @@ def translate_with_column(op: WithColumn, counter: int, input_sheet: str, input_
             continue
 
         if col_name in input_schema:
-            col_idx = input_schema.index(col_name)
-            col_ref = _col_to_range_ref(input_sheet, input_range, col_name, col_idx, data_only=True)
-
             operations.append({
                 'type': 'set_formula',
                 'sheet': sheet_name,
                 'row': 1,
                 'col': j,
-                'formula': f"=ARRAYFORMULA({col_ref})"
+                'formula': f"=ARRAYFORMULA({_col_ref(input_sheet, input_range, col_name, input_schema)})"
             })
 
     # Translate the expression to formula
@@ -1391,15 +1361,12 @@ def translate_melt(op: Melt, counter: int, input_sheet: str, input_range: Range,
     })
 
     # Reference to first id column (used for row count in formulas)
-    first_id_ref = _col_to_range_ref(
-        input_sheet, input_range, id_vars[0], input_schema.index(id_vars[0]), data_only=True
-    )
+    first_id_ref = _col_ref(input_sheet, input_range, id_vars[0], input_schema)
 
     # For each identifier column: repeat each value k times
     # =ARRAYFORMULA(INDEX(col, INT((ROW(INDIRECT("1:"&ROWS(col)*k))-1)/k)+1))
     for j, id_col in enumerate(id_vars):
-        col_idx = input_schema.index(id_col)
-        col_ref = _col_to_range_ref(input_sheet, input_range, id_col, col_idx, data_only=True)
+        col_ref = _col_ref(input_sheet, input_range, id_col, input_schema)
 
         formula = (
             f'=ARRAYFORMULA(INDEX({col_ref}, '
@@ -1432,10 +1399,7 @@ def translate_melt(op: Melt, counter: int, input_sheet: str, input_range: Range,
 
     # Value column: cycle through source value columns
     # =ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"&ROWS(col)*k))-1, k)+1, col_v1, col_v2, ...))
-    value_refs = []
-    for v_col in value_vars:
-        v_idx = input_schema.index(v_col)
-        value_refs.append(_col_to_range_ref(input_sheet, input_range, v_col, v_idx, data_only=True))
+    value_refs = [_col_ref(input_sheet, input_range, v_col, input_schema) for v_col in value_vars]
 
     value_refs_str = ", ".join(value_refs)
     value_formula = (
@@ -1506,15 +1470,12 @@ def translate_window(op: Window, counter: int, input_sheet: str, input_range: Ra
 
     # Copy existing columns via array formulas
     for j, col_name in enumerate(input_schema):
-        col_idx = input_schema.index(col_name)
-        col_ref = _col_to_range_ref(input_sheet, input_range, col_name, col_idx, data_only=True)
-
         operations.append({
             'type': 'set_formula',
             'sheet': sheet_name,
             'row': 1,
             'col': j,
-            'formula': f"=ARRAYFORMULA({col_ref})"
+            'formula': f"=ARRAYFORMULA({_col_ref(input_sheet, input_range, col_name, input_schema)})"
         })
 
     # Determine window function category and generate per-row formulas
@@ -1638,8 +1599,7 @@ def _translate_window_running_agg(ctx: WindowTranslationContext) -> None:
             f"Running aggregate window function '{ctx.op.function}' requires an input column"
         )
 
-    c_idx = ctx.input_schema.index(input_col)
-    agg_range = _col_to_range_ref(ctx.input_sheet, ctx.input_range, input_col, c_idx, data_only=True)
+    agg_range = _col_ref(ctx.input_sheet, ctx.input_range, input_col, ctx.input_schema)
 
     for i in range(ctx.data_rows):
         row_in_sheet = 2 + i

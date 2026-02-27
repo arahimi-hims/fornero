@@ -28,6 +28,9 @@ class Optimizer:
             return pred2
         if pred2 is None:
             return pred1
+        from fornero.algebra.expressions import Expression
+        if isinstance(pred1, Expression) and isinstance(pred2, Expression):
+            return pred1 & pred2
         from fornero.algebra.expressions import BinaryOp
         return BinaryOp(op='and', left=pred1, right=pred2)
 
