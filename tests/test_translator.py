@@ -877,14 +877,18 @@ class TestEdgeCases:
         assert len(ops) > 0
 
     def test_invalid_column_reference_raises_error(self):
-        """Reference to non-existent column raises error."""
-        source = Source(source_id="test.csv", schema=["a", "b"])
-        select = Select(columns=["c"], inputs=[source])  # 'c' doesn't exist
-        plan = LogicalPlan(select)
+        """Reference to non-existent column raises error.
 
-        translator = Translator()
-        with pytest.raises(ValueError, match="not found"):
-            translator.translate(plan, source_data={"test.csv": [[1, 2]]})
+        With early schema validation, this error is now caught at operation
+        construction time rather than during translation.
+        """
+        from fornero.algebra.operations import SchemaValidationError
+
+        source = Source(source_id="test.csv", schema=["a", "b"])
+
+        # Error now caught at construction time with early validation
+        with pytest.raises(SchemaValidationError, match="non-existent columns"):
+            Select(columns=["c"], inputs=[source])
 
 
 if __name__ == "__main__":
