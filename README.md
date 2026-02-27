@@ -49,7 +49,7 @@ spreadsheet = SheetsExecutor(client).execute(
 print(spreadsheet.url)
 ```
 
-Here is [the spreadsheet it produces](https://docs.google.com/spreadsheets/d/1YJ8mOm5zyEWSIJroD7eO2_oMMpdlUU5xAvK4qpBKBcc/edit?gid=0#gid=0).
+Here is [the spreadsheet it produces](https://docs.google.com/spreadsheets/d/1LyhiYknIi227T0zuiBZumBW5wp2E6n9xpgVfkN_9zM0).
 Each operation (`filter`, `assign`, `sort_values`, column selection) becomes a
 spreadsheet formula (`FILTER`, `ARRAYFORMULA`, `SORT`, column references) so
 the generated sheet stays live — edit the source data and every derived cell
@@ -108,19 +108,25 @@ Fornero talks to Google Sheets through [`gspread`](https://docs.gspread.org/), w
 With the key file in the default location, you can verify it works:
 
 ```bash
-uv run python -c "import gspread; print('Authenticated as', gspread.service_account().http_client.credentials.service_account_email)"
+uv run python -c "import gspread; print('Authenticated as', gspread.service_account().http_client.auth.service_account_email)"
 ```
 
 ### Option 2: OAuth (interactive / personal use)
 
-1. In the Google Cloud Console, go to **APIs & Services > Credentials**.
+1. In the Google Cloud Console, go to [**APIs & Services**](https://console.cloud.google.com/apis) > [**Credentials**](https://console.cloud.google.com/apis/credentials).
 2. Create an **OAuth 2.0 Client ID** (application type: Desktop).
 3. Download the credentials JSON and place it at `~/.config/gspread/credentials.json`.
 4. On first use, `gspread.oauth()` will open a browser window for you to authorize access. A token is cached locally for subsequent runs.
 
 ```bash
-uv run python -c "import gspread; print('Authenticated as', gspread.oauth().http_client.credentials.client_id)"
+uv run python -c "import gspread; print('Authenticated as', gspread.oauth().http_client.auth.client_id)"
 ```
+
+You'll need to enable the Google Sheets and Google Drive APIs for this token:
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and select the project used by your credentials (service account key or OAuth client).
+2. Go to **APIs & Services** → **Library** (or [enable APIs](https://console.cloud.google.com/apis/library)).
+3. Enable **Google Sheets API** and **Google Drive API** for that project.
 
 ## Running the Examples
 
