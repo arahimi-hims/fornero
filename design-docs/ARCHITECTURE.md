@@ -55,7 +55,7 @@ Equi-join parameterised by join type. Given relations $R_1$, $R_2$, key columns 
 
 $$\text{Join}(R_1, R_2, k_1, k_2, \tau)$$
 
-For $\tau = \text{inner}$: produce all $(r_1 \| r_2)$ where $r_1.k_1 = r_2.k_2$, concatenating columns from both relations (dropping $k_2$). For $\tau = \text{left}$: as inner, but every row of $R_1$ appears at least once; unmatched $R_2$ columns are null. Right and outer are defined symmetrically. Output schema is $\mathcal{S}(R_1) \cup \mathcal{S}(R_2) \setminus \{k_2\}$.
+For $\tau = \text{inner}$: produce all $(r_1 \,\|\, r_2)$ where $r_1.k_1 = r_2.k_2$, concatenating columns from both relations (dropping $k_2$). For $\tau = \text{left}$: as inner, but every row of $R_1$ appears at least once; unmatched $R_2$ columns are null. Right and outer are defined symmetrically. Output schema is $\mathcal{S}(R_1) \cup \mathcal{S}(R_2) \setminus \{k_2\}$.
 
 #### GroupBy
 
@@ -63,7 +63,7 @@ Partitioned aggregation. Given $R$, grouping keys $K = [g_1, \ldots, g_m] \subse
 
 $$\text{GroupBy}(R, K, A) = \left[\, (v_1, \ldots, v_m, f_1(G.c_1), \ldots, f_n(G.c_n)) \;\middle|\; (v_1, \ldots, v_m) \in \text{distinct}_K(R),\; G = \sigma_{g_1 = v_1 \land \cdots \land g_m = v_m}(R) \,\right]$$
 
-Output schema is $K \mathbin\| [a_1, \ldots, a_n]$. The order of groups is the order of first appearance in $R$.
+Output schema is $K \,\|\, [a_1, \ldots, a_n]$. The order of groups is the order of first appearance in $R$.
 
 #### Sort
 
@@ -86,7 +86,7 @@ Schema is unchanged.
 
 Schema extension. Given $R$, a column name $c$, and an expression $e : \text{Row} \to \text{Value}$:
 
-$$\text{WithColumn}(R, c, e) = [\, r \| (c \mapsto e(r)) \mid r \in R \,]$$
+$$\text{WithColumn}(R, c, e) = [\, r \,\|\, (c \mapsto e(r)) \mid r \in R \,]$$
 
 If $c \in \mathcal{S}(R)$, the existing column is replaced in place. If $c \notin \mathcal{S}(R)$, the column is appended. Row order is preserved.
 
@@ -102,7 +102,7 @@ The result is always a single row. Output schema is $[a_1, \ldots, a_n]$.
 
 Vertical concatenation. Given relations $R_1, R_2$ with $\mathcal{S}(R_1) = \mathcal{S}(R_2)$:
 
-$$\text{Union}(R_1, R_2) = R_1 \mathbin\| R_2$$
+$$\text{Union}(R_1, R_2) = R_1 \,\|\, R_2$$
 
 All rows of $R_1$ appear first, followed by all rows of $R_2$. Schema is $\mathcal{S}(R_1)$. Duplicates are retained (multiset union).
 
@@ -118,15 +118,15 @@ The output relation has rows corresponding to distinct values of $i$ and columns
 
 Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters $\text{var\_name}$ (default $\texttt{"variable"}$) and $\text{value\_name}$ (default $\texttt{"value"}$):
 
-$$\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name}) = \left[\, r|_I \| (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
+$$\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name}) = \left[\, r|_I \,\|\, (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
 
-Each row of $R$ fans out to $|V|$ rows. Output schema is $I \mathbin\| [\text{var\_name}, \text{value\_name}]$.
+Each row of $R$ fans out to $|V|$ rows. Output schema is $I \,\|\, [\text{var\_name}, \text{value\_name}]$.
 
 #### Window
 
 Windowed computation. Given $R$, a window specification $W = (\text{partition}: K,\; \text{order}: O,\; \text{frame}: F)$, a window function $f$, an input column $c$, and an output column name $a$:
 
-$$\text{Window}(R, W, f, c, a) = \left[\, r \| (a \mapsto f(F_W(r).c)) \mid r \in R \,\right]$$
+$$\text{Window}(R, W, f, c, a) = \left[\, r \,\|\, (a \mapsto f(F_W(r).c)) \mid r \in R \,\right]$$
 
 where $F_W(r)$ is the frame of rows visible to $r$ — the subset of $R$ sharing the same partition-key values as $r$, ordered by $O$, and bounded by frame $F$ (e.g., unbounded preceding to current row). Row order and the original schema are preserved; column $a$ is appended.
 
@@ -283,9 +283,9 @@ $$\mathcal{T}(\text{GroupBy})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(?,\
 
 The translator uses a **single-sheet strategy** that preserves first-appearance order without requiring auxiliary sheets or re-sorting. The strategy combines Google Sheets' $\texttt{UNIQUE}$ function (which preserves first-appearance order natively) with per-row conditional aggregation formulas.
 
-**Step 1**: Write headers $K \mathbin\| [a_1, \ldots, a_p]$ via $\text{SetValues}$:
+**Step 1**: Write headers $K \,\|\, [a_1, \ldots, a_p]$ via $\text{SetValues}$:
 
-$$\text{SetValues}(\mathcal{W}, s, (0, 0), K \mathbin\| [a_1, \ldots, a_p])$$
+$$\text{SetValues}(\mathcal{W}, s, (0, 0), K \,\|\, [a_1, \ldots, a_p])$$
 
 **Step 2**: Extract distinct group keys in first-appearance order via $\texttt{UNIQUE}$:
 
@@ -369,7 +369,7 @@ Given $\text{WithColumn}(R, c, e)$ with input at $\rho$:
 
 $$\mathcal{T}(\text{WithColumn})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(|\rho.\text{rows}|\!-\!1,\; |\mathcal{S}_{\text{out}}|\!-\!1))$$
 
-where $\mathcal{S}_{\text{out}} = \mathcal{S}(R)$ with $c$ replaced in place if $c \in \mathcal{S}(R)$, or $\mathcal{S}(R) \mathbin\| [c]$ if $c \notin \mathcal{S}(R)$.
+where $\mathcal{S}_{\text{out}} = \mathcal{S}(R)$ with $c$ replaced in place if $c \in \mathcal{S}(R)$, or $\mathcal{S}(R) \,\|\, [c]$ if $c \notin \mathcal{S}(R)$.
 
 The translator creates a fresh sheet $s$ and writes headers $\mathcal{S}_{\text{out}}$ via $\text{SetValues}$. For each column $c_j \in \mathcal{S}_{\text{out}}$:
 
@@ -381,7 +381,7 @@ $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, j),\; \texttt{=ARRAYFORMULA(}\tex
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, j),\; \texttt{=ARRAYFORMULA(}\varphi_e\texttt{)}\right)$$
 
-The expression $e$ is translated to a formula $\varphi_e$: column references $r.c_i$ become range references $\text{col}(\rho, c_i)$, arithmetic operators map directly, and unsupported Python operations raise $\texttt{UnsupportedOperationError}$. The $\texttt{ARRAYFORMULA}$ wrapper is required by Google Sheets to spill range-based expressions across all data rows. Row order is preserved. **Correctness**: $\text{eval}(\rho') = [\, r \| (c \mapsto e(r)) \mid r \in R \,]$.
+The expression $e$ is translated to a formula $\varphi_e$: column references $r.c_i$ become range references $\text{col}(\rho, c_i)$, arithmetic operators map directly, and unsupported Python operations raise $\texttt{UnsupportedOperationError}$. The $\texttt{ARRAYFORMULA}$ wrapper is required by Google Sheets to spill range-based expressions across all data rows. Row order is preserved. **Correctness**: $\text{eval}(\rho') = [\, r \,\|\, (c \mapsto e(r)) \mid r \in R \,]$.
 
 #### Translating Union
 
@@ -393,7 +393,7 @@ The translator creates a fresh sheet $s$, writes headers $\mathcal{S}(R_1)$ via 
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=\{}\rho_{1,\text{data}}\texttt{;}\; \rho_{2,\text{data}}\texttt{\}}\right)$$
 
-The semicolon in $\texttt{\{A ; B\}}$ denotes vertical concatenation: all rows of $\rho_1$ appear first, followed by all rows of $\rho_2$. Duplicates are retained (multiset union). **Correctness**: $\text{eval}(\rho') = R_1 \mathbin\| R_2$.
+The semicolon in $\texttt{\{A ; B\}}$ denotes vertical concatenation: all rows of $\rho_1$ appear first, followed by all rows of $\rho_2$. Duplicates are retained (multiset union). **Correctness**: $\text{eval}(\rho') = R_1 \,\|\, R_2$.
 
 #### Translating Pivot
 
@@ -434,7 +434,7 @@ Given $\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name})$ with $I = [i_
 
 $$\mathcal{T}(\text{Melt})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(|\rho.\text{rows}| \cdot k \!-\! 1,\; m\!+\!1))$$
 
-Each input row fans out to $k = |V|$ output rows. The translator creates a fresh sheet $s$ and writes headers $I \mathbin\| [\text{var\_name}, \text{value\_name}]$ via $\text{SetValues}$.
+Each input row fans out to $k = |V|$ output rows. The translator creates a fresh sheet $s$ and writes headers $I \,\|\, [\text{var\_name}, \text{value\_name}]$ via $\text{SetValues}$.
 
 For each identifier column $i_j \in I$, the translator installs an array formula that repeats each source value $k$ times:
 
@@ -450,7 +450,7 @@ For the $\text{value\_name}$ column (position $m\!+\!1$), the translator selects
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, m\!+\!1),\; \texttt{=ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"\&ROWS(}\text{col}(\rho, i_1)\texttt{)*}k\texttt{))-1,}k\texttt{)+1,}\; \text{col}(\rho, v_1)\texttt{,}\; \ldots\texttt{,}\; \text{col}(\rho, v_k)\texttt{))}\right)$$
 
-$\texttt{CHOOSE}$ with $\texttt{MOD}$ cycles through the $k$ value columns in order. **Correctness**: $\text{eval}(\rho') = [\, r|_I \| (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \mid r \in R, c \in V \,]$.
+$\texttt{CHOOSE}$ with $\texttt{MOD}$ cycles through the $k$ value columns in order. **Correctness**: $\text{eval}(\rho') = [\, r|_I \,\|\, (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \mid r \in R, c \in V \,]$.
 
 #### Translating Window
 
@@ -458,7 +458,7 @@ Given $\text{Window}(R, W, f, c, a)$ with $W = (\text{partition}: K,\; \text{ord
 
 $$\mathcal{T}(\text{Window})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(|\rho.\text{rows}|\!-\!1,\; |\mathcal{S}(R)|))$$
 
-The translator creates a fresh sheet $s$, writes headers $\mathcal{S}(R) \mathbin\| [a]$ via $\text{SetValues}$. For all existing columns $c_j \in \mathcal{S}(R)$, $\texttt{ARRAYFORMULA}$-wrapped references to the source are installed as in WithColumn. The window column $a$ is placed at position $|\mathcal{S}(R)|$.
+The translator creates a fresh sheet $s$, writes headers $\mathcal{S}(R) \,\|\, [a]$ via $\text{SetValues}$. For all existing columns $c_j \in \mathcal{S}(R)$, $\texttt{ARRAYFORMULA}$-wrapped references to the source are installed as in WithColumn. The window column $a$ is placed at position $|\mathcal{S}(R)|$.
 
 Window formulas are **per-row** (not array formulas) because each row's visible frame may differ. For row $i$ (0-indexed in the data), the formula depends on the window function $f$:
 
@@ -482,7 +482,7 @@ where $C_{1+i}$ is the cell holding column $c$'s value for the current row, $\de
 
 For window specifications that cannot be expressed with available Google Sheets formulas (e.g., custom frame bounds beyond unbounded-preceding-to-current-row, or partition-aware lag/lead that must not cross partition boundaries), the translator raises $\texttt{UnsupportedOperationError}$.
 
-Row order and the original schema are preserved; column $a$ is appended. **Correctness**: $\text{eval}(\rho') = [\, r \| (a \mapsto f(F_W(r).c)) \mid r \in R \,]$.
+Row order and the original schema are preserved; column $a$ is appended. **Correctness**: $\text{eval}(\rho') = [\, r \,\|\, (a \mapsto f(F_W(r).c)) \mid r \in R \,]$.
 
 #### Optimization Passes
 
