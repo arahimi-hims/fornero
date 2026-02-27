@@ -345,9 +345,14 @@ class TestUnionEagerSchemaValidation:
     """BUG_FIX_PLAN.md §Bug 9: the eager Union path calls ``pd.concat``
     without validating that both inputs have identical schemas, violating
     the architecture's precondition S(R1) = S(R2).
+
+    FIXED: Early schema validation now catches this at construction time.
     """
 
     def test_union_eager_rejects_mismatched_schemas(self):
+        """Union with mismatched schemas raises SchemaValidationError at construction."""
+        from fornero.algebra.operations import SchemaValidationError
+
         left = Source(
             source_id="l",
             schema=["a", "b"],
@@ -358,10 +363,10 @@ class TestUnionEagerSchemaValidation:
             schema=["x", "y"],
             data=pd.DataFrame({"x": [3], "y": [4]}),
         )
-        union_op = Union(inputs=[left, right])
 
-        with pytest.raises((ValueError, UnsupportedOperationError)):
-            execute(union_op)
+        # Now caught at construction time with early validation
+        with pytest.raises(SchemaValidationError, match="identical schemas"):
+            Union(inputs=[left, right])
 
 
 class TestWindowEagerRunningAggregate:
