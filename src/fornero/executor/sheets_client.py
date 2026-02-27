@@ -5,7 +5,7 @@ This module provides a high-level interface to the Google Sheets API via gspread
 with error wrapping for common spreadsheet operations.
 """
 
-from typing import Any, List
+from typing import Any, Dict, List
 
 import gspread
 from gspread.exceptions import APIError
@@ -132,15 +132,15 @@ class SheetsClient:
     def batch_update_values(
         self,
         worksheet: gspread.Worksheet,
-        updates: List[tuple]
+        updates: List[Dict[str, Any]]
     ) -> None:
         """
         Batch update multiple value ranges in a worksheet.
 
         Args:
             worksheet: The worksheet to write to
-            updates: List of (range_name, values) tuples where:
-                - range_name: A1 notation range (e.g., "A1:C10")
+            updates: List of dictionaries with 'range' and 'values' keys where:
+                - range: A1 notation range (e.g., "A1:C10")
                 - values: 2D list of values to write
 
         Raises:
@@ -150,15 +150,7 @@ class SheetsClient:
             return
 
         try:
-            # Build batch update data
-            data = [
-                {
-                    'range': range_name,
-                    'values': values
-                }
-                for range_name, values in updates
-            ]
-            worksheet.batch_update(data)
+            worksheet.batch_update(updates)
         except APIError as e:
             raise SheetsAPIError(
                 f"Failed to batch update {len(updates)} value ranges: {e}"
@@ -167,16 +159,16 @@ class SheetsClient:
     def batch_update_formulas(
         self,
         worksheet: gspread.Worksheet,
-        updates: List[tuple]
+        updates: List[Dict[str, Any]]
     ) -> None:
         """
         Batch update multiple formulas in a worksheet.
 
         Args:
             worksheet: The worksheet to write to
-            updates: List of (cell, formula) tuples where:
-                - cell: A1 notation cell (e.g., "B2")
-                - formula: The formula to write (should start with '=')
+            updates: List of dictionaries with 'range' and 'values' keys where:
+                - range: A1 notation cell (e.g., "B2")
+                - values: 2D list containing the formula
 
         Raises:
             SheetsAPIError: If the API call fails
@@ -185,15 +177,7 @@ class SheetsClient:
             return
 
         try:
-            # Build batch update data
-            data = [
-                {
-                    'range': cell,
-                    'values': [[formula]]
-                }
-                for cell, formula in updates
-            ]
-            worksheet.batch_update(data, raw=False)
+            worksheet.batch_update(updates, raw=False)
         except APIError as e:
             raise SheetsAPIError(
                 f"Failed to batch update {len(updates)} formulas: {e}"
