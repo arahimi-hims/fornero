@@ -281,21 +281,43 @@ Given $\text{GroupBy}(R, K, A)$ with keys $K = [g_1, \ldots, g_m]$, aggregations
 
 $$\mathcal{T}(\text{GroupBy})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(?,\; m + p - 1))$$
 
-Google Sheets' $\texttt{QUERY ... GROUP BY}$ sorts groups alphabetically, which violates the first-appearance ordering invariant required by the dataframe algebra. The translator therefore uses a **two-sheet strategy**: a helper sheet for the aggregation and an output sheet that restores first-appearance order.
+The translator uses a **single-sheet strategy** that preserves first-appearance order without requiring auxiliary sheets or re-sorting. The strategy combines Google Sheets' $\texttt{UNIQUE}$ function (which preserves first-appearance order natively) with per-row conditional aggregation formulas.
 
-**Helper sheet** $s_q$ — performs the aggregation via $\texttt{QUERY}$:
+**Step 1**: Write headers $K \mathbin\| [a_1, \ldots, a_p]$ via $\text{SetValues}$:
 
-$$\text{SetFormula}\!\left(\mathcal{W}, s_q, (0, 0),\; \texttt{=QUERY(}\rho_{\text{all}}\texttt{, "SELECT } Q(K) \texttt{, } Q(A) \texttt{ GROUP BY } Q(K) \texttt{ LABEL } Q(A_\text{labels}) \texttt{"}\texttt{)}\right)$$
+$$\text{SetValues}(\mathcal{W}, s, (0, 0), K \mathbin\| [a_1, \ldots, a_p])$$
 
-where $Q(K)$ maps each key $g_i$ to its $\texttt{QUERY}$ column letter ($\texttt{Col1}, \texttt{Col2}, \ldots$) based on $\text{idx}_\rho(g_i)$, and $Q(A)$ maps each $(a_i, f_i, c_i)$ to a $\texttt{QUERY}$ aggregation clause. The function mapping is: $\text{sum} \to \texttt{SUM}$, $\text{mean} \to \texttt{AVG}$, $\text{count} \to \texttt{COUNT}$, $\text{min} \to \texttt{MIN}$, $\text{max} \to \texttt{MAX}$. $\texttt{QUERY}$ emits its own header row, so no separate $\text{SetValues}$ header is needed on the helper sheet.
+**Step 2**: Extract distinct group keys in first-appearance order via $\texttt{UNIQUE}$:
 
-**Output sheet** $s$ — re-sorts the helper sheet's rows into first-appearance order. The translator writes headers $K \mathbin\| [a_1, \ldots, a_p]$ via $\text{SetValues}$ and installs a $\texttt{SORT}$ formula that orders by the position of each group key's first occurrence in the original data:
+For single-key grouping ($m = 1$):
 
-$$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=SORT(}s_q\texttt{!}\rho_{q,\text{data}}\texttt{,}\; \texttt{XMATCH(}s_q\texttt{!}\text{col}(\rho_q, g_1)\texttt{,}\; \texttt{UNIQUE(}\text{col}(\rho, g_1)\texttt{))}\texttt{, TRUE}\texttt{)}\right)$$
+$$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=UNIQUE(}\text{col}(\rho, g_1)\texttt{)}\right)$$
 
-$\texttt{UNIQUE(}\text{col}(\rho, g_1)\texttt{)}$ extracts the distinct key values in first-appearance order from the original input. $\texttt{XMATCH}$ maps each alphabetically-sorted group from $s_q$ to its first-appearance position, and $\texttt{SORT}$ reorders accordingly. For multi-key group-bys, the $\texttt{XMATCH}$ expression uses a concatenated composite key.
+For multi-key grouping ($m > 1$), the translator references all key columns together. If keys are contiguous in the source schema, a single range is used; otherwise an array construction $\texttt{\{col}_1\texttt{, col}_2\texttt{, }\ldots\texttt{\}}$ combines them:
 
-Output row count is indeterminate. **Correctness**: $\text{eval}(\rho') = \gamma_{K, A}(\text{eval}(\rho))$, with groups in first-appearance order.
+$$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=UNIQUE(}\rho_{K}\texttt{)}\right)$$
+
+where $\rho_{K}$ denotes the range spanning columns $g_1, \ldots, g_m$ in $\rho_{\text{data}}$ (contiguous case) or $\texttt{\{}\text{col}(\rho, g_1)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{\}}$ (non-contiguous case).
+
+$\texttt{UNIQUE}$ spills vertically and preserves the order of first occurrence, satisfying the dataframe algebra's ordering invariant.
+
+**Step 3**: For each aggregation $(a_i, f_i, c_i) \in A$, install per-row formulas that conditionally aggregate over the source data matching the current row's key values. For output row $r$ (data rows begin at offset 1, i.e., spreadsheet row 2 in 1-indexed notation):
+
+$$\text{SetFormula}\!\left(\mathcal{W}, s, (r, m\!+\!i),\; \texttt{=IF(}s\!\texttt{!}(r, 0)\texttt{="", "", }f_i^{\mathcal{C}}(\ldots)\texttt{)}\right)$$
+
+where $s\!\texttt{!}(r, 0)$ is the first key column cell for row $r$, and $f_i^{\mathcal{C}}$ is the conditional variant of the aggregation function:
+
+- $\text{sum} \to \texttt{SUMIFS(}\text{col}(\rho, c_i)\texttt{, }\text{col}(\rho, g_1)\texttt{, }s\!\texttt{!}(r, 0)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{, }s\!\texttt{!}(r, m\!-\!1)\texttt{)}$
+- $\text{mean} \to \texttt{AVERAGEIFS(}\text{col}(\rho, c_i)\texttt{, }\text{col}(\rho, g_1)\texttt{, }s\!\texttt{!}(r, 0)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{, }s\!\texttt{!}(r, m\!-\!1)\texttt{)}$
+- $\text{count} \to \texttt{COUNTIFS(}\text{col}(\rho, g_1)\texttt{, }s\!\texttt{!}(r, 0)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{, }s\!\texttt{!}(r, m\!-\!1)\texttt{)}$
+- $\text{min} \to \texttt{MINIFS(}\text{col}(\rho, c_i)\texttt{, }\text{col}(\rho, g_1)\texttt{, }s\!\texttt{!}(r, 0)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{, }s\!\texttt{!}(r, m\!-\!1)\texttt{)}$
+- $\text{max} \to \texttt{MAXIFS(}\text{col}(\rho, c_i)\texttt{, }\text{col}(\rho, g_1)\texttt{, }s\!\texttt{!}(r, 0)\texttt{, }\ldots\texttt{, }\text{col}(\rho, g_m)\texttt{, }s\!\texttt{!}(r, m\!-\!1)\texttt{)}$
+
+Each $\texttt{*IFS}$ function scans the source data and aggregates values from $\text{col}(\rho, c_i)$ where all key columns match the current row's key values. The outer $\texttt{IF}$ checks if the key cell is empty (no more groups beyond those returned by $\texttt{UNIQUE}$) and returns an empty string in that case, preventing spurious calculations.
+
+The translator pre-allocates a fixed number of rows (e.g., 100) to accommodate the $\texttt{UNIQUE}$ spill and per-row formulas. Output row count is indeterminate at translation time.
+
+**Correctness**: $\text{eval}(\rho') = \gamma_{K, A}(\text{eval}(\rho))$, with groups in first-appearance order. The $\texttt{UNIQUE}$ function preserves first-appearance order, and the conditional aggregation formulas compute the correct aggregates for each group.
 
 #### Translating Aggregate
 
@@ -394,6 +416,17 @@ $\texttt{INDEX(..., 1)}$ selects the first matching value, implementing the defa
 $$\mathcal{T}(\text{Pivot})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(?,\; ?))$$
 
 Output dimensions are indeterminate at translation time — both the number of rows (distinct index values) and columns (distinct pivot values) depend on the data. **Correctness**: $\text{eval}(\rho')$ is the pivoted relation as defined in §Pivot.
+
+**Dimension fallback strategy:** When the translator cannot determine the exact output dimensions (because source data is unavailable or the input chain does not trace back to a Source node), it uses conservative default allocations to ensure the output sheet has sufficient capacity:
+
+- **Index dimension** (rows): defaults to 100 rows when the number of distinct index values cannot be determined
+- **Pivot dimension** (columns): defaults to 50 columns when the number of distinct pivot values cannot be determined
+
+These defaults are applied during sheet creation (via `CreateSheet` operations) to pre-allocate grid space for the formulas. The actual visible data may be smaller, as the $\texttt{UNIQUE}$ formula for index values and the $\texttt{TRANSPOSE(SORT(UNIQUE(...)))}$ formula for pivot values will only spill as many cells as there are distinct values in the source data. However, the per-cell lookup formulas are generated for the entire allocated grid.
+
+**Rationale:** This fallback handles dynamic data scenarios where the plan is translated without access to the underlying data (e.g., when serializing a plan for later execution, or when the data resides in an external system). The conservative defaults (100 rows × 50 columns = 5,000 cells) balance two concerns: they are large enough to accommodate typical pivot tables without truncation, yet small enough to avoid performance degradation from excessive formula evaluation in Google Sheets.
+
+**Performance implications:** When the actual data has fewer distinct values than the defaults, the excess cells will contain formulas that evaluate to empty strings (via $\texttt{IFERROR(..., "")}$ wrapping). Google Sheets lazily evaluates formulas, so the performance impact is minimal for unused cells. Conversely, if the actual data exceeds the defaults, the pivot table will be silently truncated — rows or columns beyond the allocated dimensions will not appear in the output. In production use, the translator should be provided with source data (via the `source_data` parameter to `translate_pivot`) so that exact dimensions can be computed by walking the operation tree back to the Source node and counting distinct values in the relevant columns.
 
 #### Translating Melt
 
