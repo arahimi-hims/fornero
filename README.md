@@ -20,8 +20,6 @@ live Google Sheet with equivalent formulas:
 ```python
 import gspread
 import fornero as pd
-from fornero.translator import Translator
-from fornero.executor import ExecutionPlan, SheetsClient, SheetsExecutor
 
 employees = pd.DataFrame(
     {
@@ -37,14 +35,12 @@ senior = employees[employees["age"] > 28]
 senior = senior.assign(salary_k=lambda x: x["salary"] / 1000)
 result = senior.sort_values("salary_k", ascending=False)[["name", "dept", "salary_k"]]
 
-# translate the recorded plan and execute it to create a live Google Sheet
-ops = Translator().translate(
+# compile the recorded plan into a live Google Sheet
+spreadsheet = pd.compile_to_sheets(
     result._plan,
     source_data={"employees": employees.values.tolist()},
-)
-client = SheetsClient(gspread.service_account())
-spreadsheet = SheetsExecutor(client).execute(
-    ExecutionPlan.from_operations(ops), "Employee Analysis",
+    title="Employee Analysis",
+    gc=gspread.service_account(),
 )
 print(spreadsheet.url)
 ```

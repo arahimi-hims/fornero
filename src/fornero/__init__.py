@@ -23,6 +23,7 @@ import pandas as _pd
 # Import core components
 from .core import DataFrame
 from .algebra import LogicalPlan
+from .compiler import compile, compile_to_sheets, compile_locally
 from .exceptions import *
 
 # Version
@@ -32,6 +33,9 @@ __version__ = "0.1.0"
 __all__ = [
     'DataFrame',
     'LogicalPlan',
+    'compile',
+    'compile_to_sheets',
+    'compile_locally',
     'read_csv',
     'merge',
     'concat',
