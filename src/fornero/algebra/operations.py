@@ -4,6 +4,27 @@ Operation nodes for the dataframe algebra.
 Each operation is a node in the logical plan tree. Operations are immutable dataclasses
 that capture the intent of a transformation without executing it.
 
+Schema Validation
+-----------------
+Operations perform **early schema validation** when schemas are available at construction
+time. This catches errors like referencing non-existent columns or attempting to union
+relations with mismatched schemas immediately, rather than deferring to execution time.
+
+Validation rules by operation:
+- **Select**: Validates that requested columns exist in input schema
+- **Filter**: Validates that predicate references valid columns (Expression AST only)
+- **Join**: Validates that join keys exist in respective input schemas
+- **Sort**: Validates that sort columns exist in input schema
+- **WithColumn**: Validates that expression references valid columns (Expression AST only)
+- **Union**: Validates that both inputs have identical schemas (S(R₁) = S(R₂))
+
+When schemas are not available (e.g., Source without explicit schema, or operations built
+during tracing phase), validation is gracefully skipped. String expressions cannot be
+validated and are also skipped.
+
+Errors are raised as SchemaValidationError (subclass of ValueError) with clear messages
+indicating which columns are missing and what columns are available.
+
 Constructor shortcuts
 ---------------------
 Unary operations accept ``input=<op>`` as shorthand for ``inputs=[<op>]``.
@@ -13,10 +34,15 @@ Binary operations (Join, Union) accept ``left=`` / ``right=`` as shorthand for
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Union
 from enum import Enum
 
 import pandas as pd
+
+
+class SchemaValidationError(ValueError):
+    """Raised when operation schema validation fails."""
+    pass
 
 
 class JoinType(str, Enum):
@@ -63,6 +89,80 @@ class Operation:
     """Base class for all operations."""
 
     inputs: List["Operation"] = field(default_factory=list)
+
+    def _get_input_schema(self) -> Optional[List[str]]:
+        """Get the schema from the single input operation.
+
+        Returns:
+            Schema (list of column names) if available, None otherwise.
+        """
+        if not self.inputs or len(self.inputs) != 1:
+            return None
+        return self._infer_schema(self.inputs[0])
+
+    def _get_input_schemas(self) -> Tuple[Optional[List[str]], ...]:
+        """Get schemas from all input operations.
+
+        Returns:
+            Tuple of schemas (one per input), None if schema not available.
+        """
+        return tuple(self._infer_schema(inp) for inp in self.inputs)
+
+    @staticmethod
+    def _infer_schema(op: "Operation") -> Optional[List[str]]:
+        """Infer the output schema of an operation.
+
+        Args:
+            op: Operation to infer schema from
+
+        Returns:
+            List of column names if inferrable, None otherwise
+        """
+        # Source nodes have explicit schema
+        if isinstance(op, Source):
+            return op.schema
+
+        # For other operations during construction, schema may not be available yet
+        # This is expected during tracing phase
+        return None
+
+    @staticmethod
+    def _extract_column_names(expression: Any) -> List[str]:
+        """Extract column names referenced in an expression.
+
+        Args:
+            expression: Expression object or string
+
+        Returns:
+            List of column names found in the expression
+        """
+        # Import here to avoid circular dependency
+        from fornero.algebra.expressions import Expression, Column, BinaryOp, UnaryOp, FunctionCall
+
+        if isinstance(expression, str):
+            # For string expressions, we can't reliably extract columns
+            # Return empty list to skip validation
+            return []
+
+        if isinstance(expression, Column):
+            return [expression.name]
+
+        if isinstance(expression, BinaryOp):
+            left_cols = Operation._extract_column_names(expression.left)
+            right_cols = Operation._extract_column_names(expression.right)
+            return left_cols + right_cols
+
+        if isinstance(expression, UnaryOp):
+            return Operation._extract_column_names(expression.operand)
+
+        if isinstance(expression, FunctionCall):
+            cols = []
+            for arg in expression.args:
+                cols.extend(Operation._extract_column_names(arg))
+            return cols
+
+        # For other expression types or None, return empty list
+        return []
 
     def to_dict(self) -> Dict[str, Any]:
         raise NotImplementedError(
@@ -169,6 +269,16 @@ class Select(Operation):
         if not self.columns:
             raise ValueError("Select operation must specify at least one column")
 
+        # Validate that requested columns exist in input schema
+        input_schema = self._get_input_schema()
+        if input_schema is not None:
+            missing_columns = [col for col in self.columns if col not in input_schema]
+            if missing_columns:
+                raise SchemaValidationError(
+                    f"Select references non-existent columns: {missing_columns}. "
+                    f"Available columns: {input_schema}"
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "type": "select",
@@ -200,6 +310,18 @@ class Filter(Operation):
             raise ValueError("Filter operation must have exactly one input")
         if not self.predicate and self.predicate != 0:
             raise ValueError("Filter operation must specify a predicate")
+
+        # Validate that condition columns exist in input schema
+        input_schema = self._get_input_schema()
+        if input_schema is not None:
+            referenced_columns = self._extract_column_names(self.predicate)
+            if referenced_columns:
+                missing_columns = [col for col in referenced_columns if col not in input_schema]
+                if missing_columns:
+                    raise SchemaValidationError(
+                        f"Filter predicate references non-existent columns: {missing_columns}. "
+                        f"Available columns: {input_schema}"
+                    )
 
     def to_dict(self) -> Dict[str, Any]:
         pred = self.predicate
@@ -257,13 +379,30 @@ class Join(Operation):
         if self.join_type not in valid_types:
             raise ValueError(f"Join type must be one of {valid_types}, got: {self.join_type}")
 
+        # Validate that join keys exist in respective schemas
+        left_schema, right_schema = self._get_input_schemas()
+        if left_schema is not None:
+            missing_left = [key for key in self.left_on if key not in left_schema]
+            if missing_left:
+                raise SchemaValidationError(
+                    f"Join left_on references non-existent columns: {missing_left}. "
+                    f"Available columns: {left_schema}"
+                )
+        if right_schema is not None:
+            missing_right = [key for key in self.right_on if key not in right_schema]
+            if missing_right:
+                raise SchemaValidationError(
+                    f"Join right_on references non-existent columns: {missing_right}. "
+                    f"Available columns: {right_schema}"
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": "join",
             "left_on": self.left_on if isinstance(self.left_on, list) else [self.left_on],
             "right_on": self.right_on if isinstance(self.right_on, list) else [self.right_on],
             "join_type": self.join_type,
-            "suffixes": list(self.suffixes),
+            "suffixes": self.suffixes,
             "inputs": [inp.to_dict() for inp in self.inputs],
         }
 
@@ -358,6 +497,17 @@ class Sort(Operation):
         if self.limit is not None and self.limit < 0:
             raise ValueError("Sort limit must be non-negative")
 
+        # Validate that sort columns exist in input schema
+        input_schema = self._get_input_schema()
+        if input_schema is not None:
+            sort_columns = [col for col, _ in self.keys]
+            missing_columns = [col for col in sort_columns if col not in input_schema]
+            if missing_columns:
+                raise SchemaValidationError(
+                    f"Sort references non-existent columns: {missing_columns}. "
+                    f"Available columns: {input_schema}"
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "type": "sort",
@@ -433,6 +583,18 @@ class WithColumn(Operation):
         if not self.expression and self.expression != 0:
             raise ValueError("WithColumn operation must specify an expression")
 
+        # Validate that referenced columns exist in input schema
+        input_schema = self._get_input_schema()
+        if input_schema is not None:
+            referenced_columns = self._extract_column_names(self.expression)
+            if referenced_columns:
+                missing_columns = [col for col in referenced_columns if col not in input_schema]
+                if missing_columns:
+                    raise SchemaValidationError(
+                        f"WithColumn expression references non-existent columns: {missing_columns}. "
+                        f"Available columns: {input_schema}"
+                    )
+
     def to_dict(self) -> Dict[str, Any]:
         expr = self.expression
         if hasattr(expr, "to_dict"):
@@ -461,6 +623,15 @@ class Union(Operation):
         self.right = None
         if len(self.inputs) != 2:
             raise ValueError("Union operation must have exactly two inputs")
+
+        # Validate schema equality: S(R₁) = S(R₂)
+        left_schema, right_schema = self._get_input_schemas()
+        if left_schema is not None and right_schema is not None:
+            if left_schema != right_schema:
+                raise SchemaValidationError(
+                    f"Union requires identical schemas. "
+                    f"Left schema: {left_schema}, Right schema: {right_schema}"
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         return {"type": "union", "inputs": [inp.to_dict() for inp in self.inputs]}
