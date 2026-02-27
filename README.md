@@ -4,9 +4,9 @@ Fornero is a compiler that converts pandas-style DataFrame programs into
 spreadsheets. The compiler defines a formal algebra for dataframes and for
 spreadsheets, and implements an optimizing compiler to translate from the former
 to the latter. The algebras and the translation between them are
-defined in `design-docs/ARCHITECTURE.md`
+defined in [`design-docs/ARCHITECTURE.md`](design-docs/ARCHITECTURE.md)
 
-This compiler is for ex-core engineers who used to write code, but now mostly
+This compiler is for ex-engineers who used to write code, but now mostly
 attend meetings and write spreadsheets to be consumed by non-engineers. It lets
 them plausibly claim that they "still write code", even though the only artifact
 of value they produce is
