@@ -116,7 +116,7 @@ The output relation has rows corresponding to distinct values of $i$ and columns
 
 #### Melt
 
-Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters var\_name (default `"variable"`) and value\_name (default `"value"`):
+Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters *var_name* (default `"variable"`) and *value_name* (default `"value"`):
 
 $$\text{Melt}(R, I, V, \text{var_name}, \text{value_name}) = \left[\, r|_I \,\|\, (\text{var_name} \mapsto c,\; \text{value_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
 
@@ -293,7 +293,7 @@ For single-key grouping ($m = 1$):
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=UNIQUE(}\text{col}(\rho, g_1)\texttt{)}\right)$$
 
-For multi-key grouping ($m > 1$), the translator references all key columns together. If keys are contiguous in the source schema, a single range is used; otherwise an array construction $\texttt{\{col}_1\texttt{, col}_2\texttt{, }\ldots\texttt{\}}$ combines them:
+For multi-key grouping ($m > 1$), the translator references all key columns together. If keys are contiguous in the source schema, a single range is used; otherwise an array construction $\texttt{\{col_1, col_2, }\ldots\texttt{\}}$ combines them:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, 0),\; \texttt{=UNIQUE(}\rho_{K}\texttt{)}\right)$$
 
