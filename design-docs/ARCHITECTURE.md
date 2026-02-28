@@ -118,7 +118,7 @@ The output relation has rows corresponding to distinct values of $i$ and columns
 
 Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters var\_name (default `"variable"`) and value\_name (default `"value"`):
 
-$$\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name}) = \left[\, r|_I \,\|\, (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
+$$\text{Melt}(R, I, V, \text{var_name}, \text{value_name}) = \left[\, r|_I \,\|\, (\text{var_name} \mapsto c,\; \text{value_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
 
 Each row of $R$ fans out to $|V|$ rows. Output schema is $I \,\|\, [\mathit{var\_name}, \mathit{value\_name}]$.
 
