@@ -116,9 +116,9 @@ The output relation has rows corresponding to distinct values of $i$ and columns
 
 #### Melt
 
-Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters `var\_name` (default `"variable"`) and `value\_name` (default `"value"`):
+Wide-to-long reshaping (inverse of Pivot). Given $R$, identifier columns $I \subseteq \mathcal{S}(R)$, value columns $V = \mathcal{S}(R) \setminus I$, and optional name parameters `var_name` (default `"variable"`) and `value_name` (default `"value"`):
 
-$$\text{Melt}(R, I, V, \text{var_name}, \text{value_name}) = \left[\, r|_I \,\|\, (\text{var_name} \mapsto c,\; \text{value_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
+$$\text{Melt}(R, I, V, \text{var\_name}, \text{value\_name}) = \left[\, r|_I \,\|\, (\text{var\_name} \mapsto c,\; \text{value\_name} \mapsto r.c) \;\middle|\; r \in R,\; c \in V \,\right]$$
 
 Each row of $R$ fans out to $|V|$ rows. Output schema is $I \,\|\, [\mathit{var\_name}, \mathit{value\_name}]$.
 
@@ -430,7 +430,7 @@ These defaults are applied during sheet creation (via `CreateSheet` operations) 
 
 #### Translating Melt
 
-Given `Melt(R, I, V, var\_name, value\_name)` with $I = [i_1, \ldots, i_m]$, $V = [v_1, \ldots, v_k]$, and input at $\rho$:
+Given `Melt(R, I, V, var_name, value_name)` with $I = [i_1, \ldots, i_m]$, $V = [v_1, \ldots, v_k]$, and input at $\rho$:
 
 $$\mathcal{T}(\text{Melt})(\mathcal{W}, \rho) = (\mathcal{W}',\; s!(0,0):(|\rho.\text{rows}| \cdot k \!-\! 1,\; m\!+\!1))$$
 
@@ -442,11 +442,11 @@ $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, j\!-\!1),\; \texttt{=ARRAYFORMULA
 
 The $\texttt{INT((ROW(...)-1)/}k\texttt{)+1}$ pattern maps each block of $k$ consecutive output rows back to the same source row index.
 
-For the `var\_name` column (position $m$), the translator generates a repeating cycle of the value-column names:
+For the `var_name` column (position $m$), the translator generates a repeating cycle of the value-column names:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, m),\; \texttt{=ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"\&ROWS(}\text{col}(\rho, i_1)\texttt{)*}k\texttt{))-1,}k\texttt{)+1,}\; \texttt{"}v_1\texttt{",}\; \ldots\texttt{,}\; \texttt{"}v_k\texttt{"))}\right)$$
 
-For the `value\_name` column (position $m\!+\!1$), the translator selects the correct source column per output row:
+For the `value_name` column (position $m\!+\!1$), the translator selects the correct source column per output row:
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, m\!+\!1),\; \texttt{=ARRAYFORMULA(CHOOSE(MOD(ROW(INDIRECT("1:"\&ROWS(}\text{col}(\rho, i_1)\texttt{)*}k\texttt{))-1,}k\texttt{)+1,}\; \text{col}(\rho, v_1)\texttt{,}\; \ldots\texttt{,}\; \text{col}(\rho, v_k)\texttt{))}\right)$$
 
