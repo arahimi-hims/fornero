@@ -273,7 +273,7 @@ The translator creates a fresh sheet $s$. For $\tau \in \{\text{inner}, \text{le
 
 $$\text{SetFormula}\!\left(\mathcal{W}, s, (1, j),\; \texttt{=XLOOKUP(}\text{col}(\rho_1, k_1)\texttt{,}\; \text{col}(\rho_2, k_2)\texttt{,}\; \text{col}(\rho_2, c)\texttt{)}\right)$$
 
-For $\tau = \text{left}$, $\texttt{XLOOKUP}$'s fourth argument (if-not-found) defaults to $\texttt{\#N/A}$, which is replaced with an empty string to produce null. For $\tau = \text{inner}$, a follow-up $\text{Filter}$ translation on a helper sheet removes rows where all looked-up columns are null. Right and outer joins reverse or duplicate the pattern symmetrically. **Correctness**: $\text{eval}(\rho') = R_1 \bowtie^{\tau}_{k_1 = k_2} R_2$.
+For $\tau = \text{left}$, $\texttt{XLOOKUP}$'s fourth argument (if-not-found) defaults to `#N/A`, which is replaced with an empty string to produce null. For $\tau = \text{inner}$, a follow-up $\text{Filter}$ translation on a helper sheet removes rows where all looked-up columns are null. Right and outer joins reverse or duplicate the pattern symmetrically. **Correctness**: $\text{eval}(\rho') = R_1 \bowtie^{\tau}_{k_1 = k_2} R_2$.
 
 #### Translating GroupBy
 
